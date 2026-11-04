@@ -1,0 +1,51 @@
+schema_version: "1.0"
+workflow:
+  id: "fast-sdd"
+  name: "Fast SDD Express (Tổ hợp Nhanh - Không rào cản)"
+  version: "1.0.0"
+  author: "EAI-2026 Team"
+  description: "Pipeline nhanh không rào cản: specify → plan → tasks → implement"
+
+requires:
+  speckit_version: ">=0.8.5"
+  integrations:
+    any:
+      - "agy"
+      - "claude"
+      - "copilot"
+      - "gemini"
+
+inputs:
+  spec:
+    type: string
+    required: true
+    prompt: "Mô tả tính năng cần thực thi nhanh"
+  integration:
+    type: string
+    default: "auto"
+    prompt: "Integration to use ('auto' uses project initialized integration)"
+
+steps:
+  - id: specify
+    command: speckit.specify
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: plan
+    command: speckit.plan
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: tasks
+    command: speckit.tasks
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: implement
+    command: speckit.implement
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"

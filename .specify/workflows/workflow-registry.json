@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "workflows": {
+    "speckit": {
+      "name": "Full SDD Cycle",
+      "version": "1.0.1",
+      "description": "Runs specify → plan → tasks → implement with review gates",
+      "source": "bundled",
+      "installed_at": "2026-11-04T02:44:18.782938+00:00",
+      "updated_at": "2026-11-04T02:44:18.782956+00:00"
+    },
+    "full-pipeline": {
+      "name": "Full 9-Skill SDD Pipeline",
+      "version": "1.2.0",
+      "description": "Chains all 9 skills: constitution → specify → clarify → checklist → plan → tasks → analyze → implement → converge",
+      "source": "local",
+      "installed_at": "2026-11-04T02:51:00.000000+00:00",
+      "updated_at": "2026-11-04T02:51:00.000000+00:00"
+    },
+    "fast-sdd": {
+      "name": "Fast SDD Express (Tổ hợp Nhanh)",
+      "version": "1.0.0",
+      "description": "Runs specify → plan → tasks → implement without review gates",
+      "source": "local",
+      "installed_at": "2026-11-04T02:51:00.000000+00:00",
+      "updated_at": "2026-11-04T02:51:00.000000+00:00"
+    }
+  }
+}

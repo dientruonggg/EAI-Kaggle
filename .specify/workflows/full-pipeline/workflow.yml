@@ -1,0 +1,105 @@
+schema_version: "1.0"
+workflow:
+  id: "full-pipeline"
+  name: "Full 9-Skill SDD Pipeline"
+  version: "1.2.0"
+  author: "EAI-2026 Team"
+  description: "Chains all 9 skills: constitution → specify → clarify → checklist → plan → tasks → analyze → implement → converge"
+
+requires:
+  speckit_version: ">=0.11.2"
+  integrations:
+    any:
+      - "agy"
+      - "claude"
+      - "copilot"
+      - "gemini"
+
+inputs:
+  spec:
+    type: string
+    required: true
+    prompt: "Mô tả tính năng / feature cần xây dựng"
+  integration:
+    type: string
+    default: "auto"
+    prompt: "Integration to use ('auto' uses project initialized integration)"
+  with_constitution:
+    type: boolean
+    default: true
+    prompt: "Chạy cập nhật hiến chương (constitution) trước khi lập spec?"
+  skip_clarify:
+    type: boolean
+    default: false
+    prompt: "Bỏ qua rào cản làm rõ (clarify gate)?"
+
+steps:
+  - id: constitution
+    type: if
+    condition: "{{ inputs.with_constitution }}"
+    then:
+      - id: constitution-run
+        command: speckit.constitution
+        integration: "{{ inputs.integration }}"
+        input: { args: "{{ inputs.spec }}" }
+
+  - id: specify
+    command: speckit.specify
+    integration: "{{ inputs.integration }}"
+    input: { args: "{{ inputs.spec }}" }
+
+  - id: clarify
+    type: if
+    condition: "{{ inputs.skip_clarify == false }}"
+    then:
+      - id: clarify-run
+        command: speckit.clarify
+        integration: "{{ inputs.integration }}"
+        input: { args: "{{ inputs.spec }}" }
+      - id: clarify-gate
+        type: gate
+        message: "Kiểm tra các câu hỏi làm rõ (clarifications) trước khi lập kế hoạch (plan)."
+        options: [approve, reject]
+        on_reject: abort
+
+  - id: plan
+    command: speckit.plan
+    integration: "{{ inputs.integration }}"
+    input: { args: "{{ inputs.spec }}" }
+
+  - id: checklist
+    command: speckit.checklist
+    integration: "{{ inputs.integration }}"
+    continue_on_error: true
+    input: { args: "{{ inputs.spec }}" }
+
+  - id: tasks
+    command: speckit.tasks
+    integration: "{{ inputs.integration }}"
+    input: { args: "{{ inputs.spec }}" }
+
+  - id: analyze
+    command: speckit.analyze
+    integration: "{{ inputs.integration }}"
+    continue_on_error: true
+    input: { args: "{{ inputs.spec }}" }
+
+  - id: implement
+    command: speckit.implement
+    integration: "{{ inputs.integration }}"
+    input: { args: "{{ inputs.spec }}" }
+
+  - id: converge-loop
+    type: do-while
+    condition: "true"
+    max_iterations: 3
+    steps:
+      - id: converge
+        command: speckit.converge
+        integration: "{{ inputs.integration }}"
+        continue_on_error: true
+        input: { args: "{{ inputs.spec }}" }
+      - id: implement-remaining
+        command: speckit.implement
+        integration: "{{ inputs.integration }}"
+        input: { args: "Hoàn thiện các tác vụ được bổ sung bởi bước hội tụ (converge) cho {{ inputs.spec }}" }

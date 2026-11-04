@@ -1,0 +1,333 @@
+                         KHOA ĐIỆN TỬ VÀ TRÍ TUỆ NHÂN TẠO
+               CLB SINH VIÊN NGHIÊN CỨU KHOA HỌC PIONEER
+
+
+                                                        Đà Nẵng, ngày 02 tháng 11 năm 2026
+
+
+             THỂ LỆ CUỘC THI EDGE AI CHALLENGE 2026 LẦN 2
+
+I. TỔNG QUAN
+Edge AI Challenge 2026 là cuộc thi học thuật dành cho sinh viên, tập trung vào xây dựng hệ thống
+thị giác máy tính và hỏi đáp về hình ảnh trong điều kiện tài nguyên tính toán hạn chế.
+Thử thách yêu cầu mỗi đội xây dựng hai thành phần học máy: (1) mô hình phát hiện vật thể (Object
+Detection) để xác định lớp và vị trí vật thể trong ảnh; (2) mô hình phân loại ý định câu hỏi bằng
+TextCNN (Intent TextCNN) để phân loại câu hỏi tiếng Việt vào nhóm ý định được quy định. Kết
+quả của hai mô hình được kết hợp với bộ xử lý logic để tạo câu trả lời ngắn theo định dạng chuẩn.
+Cuộc thi gồm hai giai đoạn. Vòng bảng được thực hiện hoàn toàn online trên Kaggle: các đội huấn
+luyện và chạy suy luận trong môi trường được quy định, sau đó nộp kết quả để hệ thống chấm tự
+động. Chung kết yêu cầu triển khai hệ thống hoàn chỉnh trên ESP32-S3 kết hợp camera OV7670;
+toàn bộ suy luận phục vụ trả lời câu hỏi phải thực hiện trên thiết bị, không chuyển ảnh hoặc câu hỏi
+sang máy tính, điện thoại, máy chủ hay dịch vụ đám mây để suy luận.
+
+1. Mục tiêu
+ Nghiên cứu mô hình phát hiện vật thể gọn nhẹ, có khả năng chuyển đổi sang TensorFlow Lite
+    for Microcontrollers.
+ Xây dựng mô hình phân loại ý định câu hỏi tiếng Việt bằng TextCNN và đánh giá bằng
+    Accuracy.
+ Kết hợp detection, intent và logic xử lý để trả lời câu hỏi về số lượng, sự tồn tại, danh sách và vị
+    trí vật thể.
+ Đánh giá cả chất lượng mô hình trên dữ liệu chuẩn hóa và khả năng triển khai trên phần cứng
+    thật.
+ Khuyến khích tối ưu độ chính xác, kích thước mô hình, độ trễ và tính ổn định.
+
+2. Đối tượng và hình thức tham gia
+ Đối tượng tham gia là sinh viên K23, K24, K25, K26 khoa Điện tử và Trí tuệ nhân tạo Trường
+    Đại học Bách khoa, Đại học Đà Nẵng . Mỗi đội gồm từ 2 đến 4 thành viên; mỗi sinh viên chỉ
+    được đăng ký tham gia một đội.
+ Vòng bảng được tổ chức trực tuyến trên Kaggle. Chung kết được tổ chức trực tiếp trên bộ phần
+    cứng chuẩn gồm ESP32-S3 và camera OV7670.
+
+
+II. LỊCH TRÌNH DỰ KIẾN
+
+
+                                     EDGE AI CHALLENGE 2026 - Lần 2
+ 24/10/2026 - 29/10/2026                             Mở đơn đăng ký
+ 01/11/2026 - 07/11/2026                             Mở vòng Warm-up, kiểm thử hệ thống thi đấu
+ 08/11/2026                                          Kickoff - Training 1
+ 09/11/2026 - 22/11/2026                             Thi đấu vòng loại
+ 23/11/2026                                          Công bố đội thi vào Chung kết + Phát Kit
+ 05/12/2026                                          Chung Kết
+
+Thời gian đăng ký, mở vòng bảng, đóng nhận bài, công bố kết quả và tổ chức chung kết được quy
+định trong kế hoạch tổ chức cuộc thi. Mọi điều chỉnh lịch trình được thông báo công khai đến các
+đội tham gia.
+
+
+III. BÀI TOÁN VÀ BỘ NHÃN
+
+1. Bài toán phát hiện vật thể
+Với mỗi ảnh đầu vào, mô hình phát hiện vật thể dự đoán lớp và bounding box của các vật thể thuộc
+bộ nhãn quy định. Dữ liệu được xây dựng theo bối cảnh đồ vật có thể chuẩn bị và quan sát trực tiếp
+bằng camera OV7670 nhằm bảo đảm tính thống nhất giữa vòng bảng và chung kết.
+  Class ID           Tên class               Tên tiếng Việt                     Ghi chú
+     0                bottle                      Chai               Gồm nhiều kiểu chai và màu sắc
+     1                 cup                        Cốc                Bao gồm các mẫu cốc khác nhau
+                                                                     Có thể nằm ngang hoặc dựng
+      2                phone                    Điện thoại
+                                                                     đứng
+      3                book                      Sách                Nhiều màu bìa và kích thước
+      4                mouse                 Chuột máy tính          Có dây hoặc không dây
+                                                                     Hộp có hình dạng gần hộp chữ
+      5                 box                        Hộp
+                                                                     nhật
+                                                                     Nhiều mẫu, màu sắc và hướng
+      6                toy_car                 Ô tô đồ chơi
+                                                                     đặt
+
+Bộ nhãn phát hiện vật thể gồm 7 lớp được quy định tại bảng 3.1. Định nghĩa nhãn, trường hợp gán
+nhãn và thứ tự class_id trong classes.txt được áp dụng thống nhất cho toàn bộ dữ liệu và các vòng
+thi.
+
+2. Dữ liệu hình ảnh
+ Ảnh dữ liệu được tạo synthesis cho vòng loại, vòng chung kết các đội được cung cấp các mẫu
+    vật thể sẽ được BTC sử dụng và đội thi được phép tự thu thập, sử dụng bất kì nguồn data nào
+    khác.
+ Kích thước ảnh nguồn là 320 × 240 pixel; kích thước đầu vào mô hình phải tuân theo giới hạn
+    kỹ thuật tại mục 5.
+ Nhãn detection gồm class_id và bounding box.
+ Bộ dữ liệu bao gồm cảnh có một vật thể, nhiều vật thể cùng lớp, nhiều lớp cùng lúc, vật thể ở
+    các vị trí khác nhau, vật thể bị che khuất một phần và ảnh không có vật thể mục tiêu.
+
+                                    EDGE AI CHALLENGE 2026 - Lần 2
+   Các đội phải khai báo đầy đủ dữ liệu ngoài và trọng số pretrained được sử dụng.
+
+3. Bài toán phân loại ý định bằng TextCNN
+Mỗi câu hỏi đầu vào là một chuỗi văn bản tiếng Việt hoặc các biến thể được BTC quy định. Đội thi
+xây dựng mô hình TextCNN để dự đoán nhãn intent. Mô hình intent phải là mô hình học máy;
+không được thay thế hoàn toàn bằng các luật từ khóa.
+          Intent                             Ý nghĩa                               Ví dụ
+         COUNT                            Đếm số lượng                “Co bao nhieu chai?”
+          EXIST                        Xác định có/không              “Co dien thoai hay khong?”
+           LIST                       Liệt kê các lớp vật thể         “Trong anh co gi?”
+        LOCATION                       Xác định vùng vị trí           “Cuon sach nam o dau?”
+      OUT_OF_SCOPE                    Câu hỏi ngoài phạm vi           “Hom nay troi co mua khong?”
+
+
+
+IV. VÒNG BẢNG: THI ONLINE TRÊN KAGGLE
+
+1. Nguyên tắc
+Vòng bảng đánh giá hai thành phần tương ứng với hệ thống chung kết: mô hình detection và mô
+hình Intent TextCNN. Các đội không phải nạp firmware hoặc chạy trực tiếp trên ESP32-S3 ở giai
+đoạn này; việc huấn luyện và suy luận được thực hiện online theo môi trường, giới hạn tài nguyên
+và quy định của cuộc thi trên Kaggle.
+Để bảo đảm khả năng triển khai tại chung kết, mô hình và quy trình tiền xử lý phải tuân thủ các giới
+hạn kỹ thuật tại mục 5. Việc đáp ứng các giới hạn này là điều kiện xác minh tư cách vào chung kết.
+
+2. File nộp bài duy nhất trên Kaggle
+Mỗi đội nộp một tệp dự đoán duy nhất có tên submission.csv trên Kaggle. Tệp này chứa kết quả của
+cả hai bài toán phát hiện vật thể và phân loại ý định; không nộp hai tệp riêng biệt. Tệp
+sample_submission.csv được cung cấp kèm bộ dữ liệu và là mẫu định dạng bắt buộc.
+    task_type,sample_id,prediction
+    DETECTION,img_0001,"[{""class_id"":0,""score"":0.91,""bbox"":[12,40,98,220]}]"
+    DETECTION,img_0002,"[]"
+    INTENT,q_0001,COUNT
+    INTENT,q_0002,LOCATION
+
+Quy ước cột:
+   task_type: nhận một trong hai giá trị DETECTION hoặc INTENT.
+   sample_id: mã ảnh đối với DETECTION hoặc mã câu hỏi đối với INTENT.
+   prediction: mảng JSON đối với DETECTION hoặc nhãn intent đối với INTENT.
+Đội thi điền kết quả dự đoán vào các dòng tương ứng, giữ nguyên toàn bộ sample_id và lưu tệp dưới
+tên submission.csv.
+   Mỗi sample_id xuất hiện đúng một lần. Với DETECTION, prediction là chuỗi JSON biểu diễn danh
+    sách bounding box; với INTENT, prediction là một nhãn intent. Dấu ngoặc kép bên trong chuỗi
+    JSON được escape theo quy tắc CSV.
+
+                                     EDGE AI CHALLENGE 2026 - Lần 2
+   Với DETECTION, mỗi phần tử trong mảng JSON gồm class_id, score và bbox. bbox có thứ tự
+    [x_min,y_min,x_max,y_max], tọa độ được tính trên ảnh gốc; class_id tuân theo classes.txt và score
+    nằm trong khoảng từ 0 đến 1. Nếu không phát hiện vật thể, prediction phải là mảng rỗng [].
+   Với INTENT, prediction phải là một trong các nhãn intent quy định tại mục 3.3. Mỗi ảnh test và mỗi
+    câu hỏi test phải có đúng một dòng; sample_id phải trùng chính xác với ID trong tập test. Không
+    được thêm, bỏ hoặc lặp ID. Mỗi ảnh được phép có tối đa 100 bounding box dự đoán. Tệp không
+    đúng định dạng hoặc không đủ ID hợp lệ sẽ bị từ chối chấm điểm.
+   Thước đo detection là mAP@0.5 (mAP50), định dạng bbox theo chuẩn YOLO.
+
+3. Quy tắc đọc file và chấm hai bài toán
+Hệ thống chấm căn cứ vào cột task_type để tách hai nhóm bản ghi trong submission.csv. Định dạng
+các dòng INTENT như sau:
+    INTENT,q_0001,COUNT
+    INTENT,q_0002,LOCATION
+
+   Với các dòng INTENT, sample_id chính là question_id và phải xuất hiện đúng một lần, không
+    thiếu, không trùng; prediction phải là nhãn intent dự đoán.
+   Nhãn intent hợp lệ gồm COUNT, EXIST, LIST, LOCATION và OUT_OF_SCOPE.
+   Script chấm sẽ tính mAP50 trên các dòng DETECTION và Accuracy = số câu hỏi dự đoán đúng
+    / tổng số câu hỏi test trên các dòng INTENT, sau đó kết hợp theo công thức tại mục 4.
+
+4. Công thức tính điểm vòng bảng
+Điểm vòng bảng được tính từ mAP50 của mô hình phát hiện vật thể và Accuracy của mô hình Intent
+TextCNN theo trọng số sau:
+       Thành phần                     Trọng số                                Cách tính
+    Detection mAP50                     70%                        Điểm thành phần = mAP50 × 100
+Intent TextCNN Accuracy                 30%                       Điểm thành phần = Accuracy × 100
+                                                                  S = 0,70 × (mAP50 × 100) + 0,30 ×
+       Tổng điểm                        100%
+                                                                           (Accuracy × 100)
+
+Trong công thức trên, mAP50 và Accuracy được biểu diễn dưới dạng số từ 0 đến 1. Công thức và
+trọng số được áp dụng thống nhất cho toàn bộ vòng bảng và không thay đổi sau khi vòng bảng bắt
+đầu.
+Bảng xếp hạng chính thức được xác định theo điểm trên tập private. Trường hợp bằng điểm, đội có
+mAP50 cao hơn được xếp trên; nếu mAP50 bằng nhau, xét Accuracy của Intent TextCNN.
+
+5. Kiểm tra định dạng submission và tính công bằng
+ Mỗi đội được nộp tối đa 4 lần trong 24 giờ. Trước thời hạn đóng vòng bảng, đội thi phải lựa
+    chọn bài nộp chính thức (bài nộp chính thức); kết quả bảng xếp hạng private của bài nộp này
+    được sử dụng để xếp hạng.
+ Cấm khai thác nhãn test, dò dữ liệu ẩn, dùng nhiều tài khoản hoặc can thiệp hệ thống chấm.
+ Không được sử dụng tập test để gán nhãn thủ công, tạo pseudo-label hoặc huấn luyện trực
+    tiếp/gián tiếp.
+ Mọi dữ liệu ngoài, mô hình pretrained và mã nguồn có ảnh hưởng đến kết quả phải được khai
+    báo.
+                                      EDGE AI CHALLENGE 2026 - Lần 2
+   Đội thi phải cung cấp notebook, mã nguồn, cấu hình huấn luyện, tệp mô hình và quy trình tái tạo
+    submission khi BTC yêu cầu.
+
+6. Điều kiện vào chung kết và xác minh
+Các đội có điểm private cao nhất được lựa chọn vào chung kết theo số lượng quy định trong thông
+báo tổ chức. Trước khi công bố danh sách chính thức, Ban Tổ chức kiểm tra khả năng tái tạo kết
+quả, nguồn dữ liệu, mô hình, số tham số, kích thước tệp, lượng tử hóa, toán tử và khả năng triển khai
+trên phần cứng.
+Kết quả Kaggle được sử dụng để xếp hạng vòng bảng. Tại chung kết, các đội phải tích hợp hai mô
+hình, xử lý câu hỏi và dữ liệu camera, biên dịch firmware, nạp chương trình lên ESP32-S3 và thực
+hiện bài kiểm tra trực tiếp.
+
+
+V. RÀNG BUỘC KỸ THUẬT TRIỂN KHAI
+Các giới hạn kỹ thuật dưới đây được áp dụng thống nhất cho sản phẩm dự thi tại chung kết nhằm
+bảo đảm mô hình có thể triển khai trên ESP32-S3.
+       Hạng mục                                       Giới hạn/điều kiện
+Phần cứng chung kết         ESP32-S3 N16R8 kết hợp camera OV7670
+                            Một mô hình detection; một lần suy luận cho mỗi ảnh; không ensemble
+Detection
+                            hoặc test-time augmentation
+Kích thước đầu vào          Mỗi chiều không vượt quá 320 × 240 pixel; khuyến nghị 96 × 96 hoặc
+detection                   128 × 128 hoặc 160 × 160
+                            TensorFlow Lite INT8; tối đa 200.000 tham số; dung lượng tệp mô hình
+Detection model
+                            không vượt quá 1,5 MB
+                            TextCNN lượng tử hóa INT8, chạy trên ESP32-S3 bằng TensorFlow
+Intent model
+                            Lite Micro; dung lượng tệp mô hình không vượt quá 1,5 MB
+                            Chỉ sử dụng các toán tử được phiên bản TensorFlow Lite Micro trong bộ
+Toán tử
+                            mã nguồn cuộc thi hỗ trợ
+                            Được sử dụng từ điển và logic để chuẩn hóa câu hỏi, trích xuất lớp vật
+Xử lý câu hỏi               thể và định dạng đáp án; không được thay thế hoàn toàn TextCNN bằng
+                            luật từ khóa
+                            Không quá 10 giây cho mỗi lượt hỏi, tính từ khi nhận yêu cầu đến khi trả
+Thời gian phản hồi
+                            kết quả
+                            Toàn bộ suy luận detection và intent phải thực hiện trên ESP32-S3;
+Suy luận                    không chuyển ảnh hoặc câu hỏi sang thiết bị hay máy chủ khác để suy
+                            luận
+
+Mô hình phải đáp ứng các giới hạn về số tham số, dung lượng, kích thước đầu vào và thời gian phản
+hồi quy định tại mục 5.
+
+
+VI. VÒNG CHUNG KẾT: HỎI ĐÁP TRỰC TIẾP TRÊN ESP32-S3
+
+1. Luồng xử lý
+1. Hệ thống nhận câu hỏi qua điểm cuối HTTP POST /ask dưới dạng JSON UTF-8, ví dụ {"q":"Co
+    bao nhieu chai trong hinh”}.
+
+                                     EDGE AI CHALLENGE 2026 - Lần 2
+2.   Chuẩn hóa câu hỏi và chạy mô hình Intent TextCNN để phân loại intent.
+3.   Xác định lớp vật thể và vùng không gian được hỏi bằng từ điển/logic theo quy tắc của cuộc thi.
+4.   Thu nhận khung hình từ OV7670, tiền xử lý và chạy mô hình detection trên ESP32-S3.
+5.   Kết hợp intent, lớp vật thể, bounding box và quy tắc trả lời để tạo đáp án.
+6.   Trả JSON theo định dạng, ví dụ {"answer":"2"}.
+
+2. Phần cứng
+Cấu hình phần cứng sử dụng thống nhất là ESP32-S3 N16R8 kết hợp camera OV7670. Sơ đồ chân,
+yêu cầu nguồn cấp, phiên bản ESP-IDF, phiên bản TensorFlow Lite Micro và bộ mã nguồn khởi tạo
+được cung cấp trong tài liệu kỹ thuật của cuộc thi (sẽ cung cấp chi tiết sơ đồ đấu chân và firmware
+cho ESP32S3 và camera OV7670).
+
+3. Nhóm câu hỏi và định dạng đáp án
+          Intent                                 Ví dụ                       Định dạng đáp án
+                                                                       Số nguyên, ví dụ: 2; không có
+COUNT                             “Co bao nhieu chai?”
+                                                                       thì 0
+EXIST                             “Co dien thoai khong?”               “Co” hoặc “Khong”
+                                                                       “2 bottle, 1 cup”; không có thì
+LIST                              “Trong anh co gi?”
+                                                                       “Khong co”
+                                                                       “ben trai”, “o giua” hoặc “ben
+LOCATION                          “Điện thoại ở đâu?”
+                                                                       phai”
+OUT_OF_SCOPE                      “Thời tiết hôm nay thế nào?”         “OOS”
+
+Câu trả lời được chuẩn hóa theo bảng định dạng tại mục 6.3. Hệ thống phải xử lý câu hỏi nhiều lớp,
+nhiều vật thể và câu hỏi ngoài phạm vi theo đúng quy tắc chấm điểm.
+
+4. Bộ cảnh kiểm tra
+Ban Tổ chức chuẩn bị các vật thể thật thuộc bộ class đã công bố. Cảnh kiểm tra bao gồm một hoặc
+nhiều vật thể, nhiều vị trí ngang, nhiều số lượng, vật thể đặt gần nhau, che khuất một phần và cảnh
+không có vật thể mục tiêu. Các câu hỏi được rút từ các nhóm intent và không công bố trước toàn bộ.
+Các cảnh chung kết dùng vật thể/mẫu sắp xếp chưa xuất hiện nguyên trạng trong tập train công khai,
+nhưng cùng định nghĩa class và điều kiện camera đã công bố. Mục đích là kiểm tra khả năng tổng
+quát hóa, không phải ghi nhớ cảnh.
+
+5. Cách chấm điểm chung kết (Dự kiến)
+Điểm chung kết được tính theo cơ cấu sau:
+       Thành phần                    Trọng số                               Cách đánh giá
+     COUNT và EXIST                    35%                  Tỷ lệ câu trả lời đúng
+                                                            Tỷ lệ câu trả lời đúng sau chuẩn hóa lớp và
+          LIST                         25%
+                                                            số lượng
+                                                            Tỷ lệ xác định đúng vùng trái/giữa/phải theo
+       LOCATION                        30%
+                                                            tâm bounding box
+                                                            Tỷ lệ bỏ qua các câu hỏi nằm ngoài phạm
+     OUT_OF_SCOPE                      10%
+                                                            vi.
+
+
+
+                                      EDGE AI CHALLENGE 2026 - Lần 2
+Mỗi đội thực hiện 20 lượt hỏi theo bộ câu hỏi và cảnh kiểm tra do Ban Tổ chức chuẩn bị. Câu trả lời
+sai định dạng hoặc vượt quá 10 giây được tính 0 điểm ở lượt đó. Kết quả được tính theo tỷ lệ trả lời
+đúng của từng nhóm intent và thời gian phản hồi trung bình.
+
+
+VII. HỒ SƠ DỰ THI VÀ TÀI NGUYÊN CUNG CẤP
+
+1. Hồ sơ đội thi
+ Notebook/mã huấn luyện detection và Intent TextCNN, cấu hình và seed nếu có.
+ Danh sách dữ liệu ngoài, nguồn pretrained.
+ Hai mô hình cuối cùng, mã tiền xử lý và hậu xử lý.
+ Một file submission.csv theo schema Ban Tổ chức công bố và notebook/mã nguồn có thể tái tạo
+    file đó.
+ Ở chung kết: project ESP-IDF đầy đủ, hướng dẫn biên dịch/nạp chương trình, hai mô hình
+    TFLite INT8, dependency và báo cáo kỹ thuật ngắn.
+ Mã nguồn phải build lại được trong môi trường được Ban Tổ chức công bố.
+
+2. Tài nguyên cung cấp
+ Dataset detection, classes.txt, nhãn mẫu.
+ Dataset câu hỏi intent có nhãn và quy tắc chuẩn hóa văn bản.
+ Notebook baseline detection và TextCNN.
+ Starter kit chung kết gồm firmware camera, endpoint /ask, ví dụ /capture và hướng dẫn biên
+    dịch/nạp chương trình.
+
+
+VIII. QUY ĐỊNH CHUNG
+ Các đội phải tuân thủ quy định về dữ liệu, khai báo mô hình và tính trung thực học thuật.
+ Cấm sử dụng dữ liệu test ẩn trái quy định, ghi cứng đáp án theo cảnh hoặc theo thứ tự câu hỏi,
+   chuyển ảnh/câu hỏi sang thiết bị khác để suy luận tại chung kết, hoặc can thiệp hệ thống chấm.
+ Ban Tổ chức có quyền yêu cầu giải trình, tái tạo kết quả, kiểm tra mã nguồn và xác minh mô
+   hình.
+ Ban Tổ chức chịu trách nhiệm giải quyết các tình huống phát sinh trên cơ sở bảo đảm tính minh
+   bạch, nhất quán và công bằng giữa các đội thi.
+ Quyết định của BTC là quyết định cuối cùng.
+
+
+
+
+                                     EDGE AI CHALLENGE 2026 - Lần 2
+

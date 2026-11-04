@@ -1,0 +1,71 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# PyTorch & Weights (Ignore raw heavy weights, track architectures/code)
+*.pt
+*.pth
+*.bin
+*.onnx
+*.tflite
+*.h5
+
+# Keep specific critical calibration/config files if needed
+!warmup/weights/tflite_micro_compat.json
+
+# Datasets & Big Data
+datasets/
+data/
+warmup/data/train/
+warmup/data/test/
+warmup/data/train_augmented_traffic/
+warmup/data/external_coco_traffic/
+qualifiers/data/train/
+qualifiers/data/val/
+qualifiers/data/test/
+
+# Runs & Logs
+runs/
+warmup/runs/
+qualifiers/runs/
+*.log
+
+# Submissions (Large CSVs can be kept or ignored, keep final csvs)
+*.tmp
+
+# Spec Kit
+.specify/.env
+.specify/state/
+.specify/runs/
+.specify/logs/

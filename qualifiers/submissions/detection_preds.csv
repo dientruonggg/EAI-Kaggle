@@ -1,0 +1,3 @@
+task_type,sample_id,prediction
+DETECTION,img_0001,"[{""class_id"": 0, ""score"": 0.91, ""bbox"": [12.0, 40.0, 98.0, 220.0]}]"
+DETECTION,img_0002,[]

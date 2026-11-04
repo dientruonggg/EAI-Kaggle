@@ -1,0 +1,17 @@
+{
+  "id": "dientruong/edge-ai-2026-qualifiers-t4",
+  "title": "Edge AI 2026 Qualifiers T4x2 Trainer",
+  "code_file": "kaggle_train_pipeline.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [],
+  "competition_sources": [
+    "edge-ai-challenge-2026-lan-2"
+  ],
+  "kernel_sources": [],
+  "model_sources": []
+}

@@ -1,0 +1,83 @@
+# 📋 Danh sách Đề tài & Quy định Cuộc thi (.ask)
+<!-- Ghi các đề tài hoặc câu hỏi bạn muốn hỏi agy vào đây -->
+
+## 🎯 Đề tài / Mục tiêu hiện tại:
+- **Cuộc thi: Edge AI Challenge 2026** (Khoa Điện tử & Trí tuệ nhân tạo).
+- **Đề tài:** Xây dựng hệ thống Hỏi - Đáp hình ảnh (**Visual Question Answering - VQA**) hoạt động **100% ON-DEVICE trên vi điều khiển ESP32-S3 kết hợp Camera OV7670**.
+- **Quy chế cốt lõi:** Toàn bộ quá trình suy luận (Inference) và trả lời phải diễn ra trực tiếp trên ESP32-S3, **tuyệt đối KHÔNG sử dụng PC, Cloud, Server, điện thoại hay bất kỳ kết nối ngoài nào**.
+- **Chiến lược kép:**
+  - **Vòng loại:** Đua top mAP trên Kaggle Leaderboard bằng các mô hình SOTA (YOLO11x, RT-DETR, WBF Ensemble).
+  - **Vòng chung kết:** Triển khai trực tiếp trên ESP32-S3 bằng mô hình TinyML (FOMO/MobileNetV2 INT8) hoặc chuyển sang Classical CV nếu có ràng buộc cấm model.
+
+---
+
+## 🏗️ Kiến trúc Hệ thống TinyVQA trên ESP32-S3 (Neuro-Symbolic Pipeline):
+Hệ thống chạy theo cơ chế **3 chặng ghép nối (Multi-stage TinyML)**:
+1. **Module 1 — Tiny NLP / Intent & Slot Parser:**
+   - Tiếp nhận câu hỏi ngắn (tiếng Việt / tiếng Anh) qua Serial / UART / Bluetooth / WebServer AP nội bộ.
+   - Phân loại ý định (`Intent`: Đếm số lượng, Xác nhận tồn tại, Nhận diện màu sắc, Vị trí không gian) và trích xuất thực thể (`Slot`: nhãn vật thể mục tiêu, màu sắc truy vấn).
+   - Triển khai: Regex / Keyword Matching kết hợp Tiny 1D-CNN hoặc BiLSTM / MLP INT8 (< 30KB Flash/RAM).
+2. **Module 2 — Vision Perception (Hai chế độ linh hoạt):**
+   - **Chế độ A (TinyML):** Chạy **FOMO (Centroid Detection)** hoặc **MobileNetV2-SSDLite (Full INT8)** qua TFLite Micro / ESP-DL. Kích thước ảnh $96 \times 96$ hoặc $128 \times 128$.
+   - **Chế độ B (Classical CV Fallback):** Xử lý ảnh cổ điển C-native (HSV Thresholding $\rightarrow$ Morphology $\rightarrow$ Contours $\rightarrow$ Circularity Geometry) khi cấm dùng Deep Learning.
+3. **Module 3 — Symbolic Reasoning & Answer Formatter:**
+   - Kết hợp kết quả từ Module 1 và Module 2 bằng code C/C++ thuần:
+     - *Hỏi tồn tại:* `count > 0` $\rightarrow$ Trả lời "Có" / "Không" (hoặc "Yes" / "No").
+     - *Hỏi đếm:* Trả về số lượng `count` theo đúng định dạng ban tổ chức yêu cầu.
+     - *Hỏi màu sắc:* Phân tích giá trị màu trung bình vùng ROI của vật thể được phát hiện.
+     - *Hỏi vị trí:* Dựa vào tọa độ $(x, y)$ (Bên trái / Bên phải / Ở giữa / Phía trên / Phía dưới).
+
+---
+
+## ⚡ Kỹ thuật Tối ưu hóa (Optimization Playbook):
+### 1. Tối ưu Đua Top Vòng loại (Kaggle Leaderboard):
+- **Data Augmentation:** Mosaic, MixUp, Random SafeCrop, ColorJitter bằng Albumentations.
+- **Training Optimization:** EMA (Exponential Moving Average), Cosine Annealing Learning Rate, Label Smoothing.
+- **Hậu xử lý:** TTA (Test-Time Augmentation), Weighted Boxes Fusion (WBF) để gộp kết quả từ 2-3 mô hình khác nhau (YOLO11x + RT-DETR) tăng $+1.5$ đến $+3.0$ điểm mAP.
+
+### 2. Tối ưu Nhúng trên Vi Điều Khiển (ESP32-S3 + OV7670):
+- **Thu nhỏ Resolution:** Ép kích thước về $96 \times 96$ hoặc $128 \times 128$, giảm FLOPs $25$ lần so với chuẩn $640 \times 640$.
+- **Lược bỏ Kênh màu (Luma Grayscale):** Trích xuất trực tiếp kênh Y từ luồng YUV422 của OV7670, giảm 3 lần dung lượng tensor.
+- **Full INT8 Quantization:** Lượng tử hóa toàn phần (Weights + Activations) bằng Representative Dataset (100-200 ảnh) $\rightarrow$ Giảm 4 lần RAM/Flash, loại bỏ hoàn toàn tính toán FP32.
+- **Tăng tốc Phần cứng SIMD Vector (PIE):** Dùng thư viện `esp-nn` để tận dụng tập lệnh vector của nhân Xtensa LX7, tăng tốc 3-5 lần.
+- **Bố trí Bộ nhớ:** Ưu tiên đặt Tensor Arena trong SRAM nội bộ để đạt tốc độ cao nhất (nếu mô hình $< 300$ KB), hoặc map sang Octal PSRAM.
+
+---
+
+## 🛡️ Phương án Dự phòng Khẩn cấp: Khi Cấm Dùng Deep Learning (Classical CV Fallback):
+Nếu đề bài cấm Neural Networks hoặc phần cứng không đủ RAM nạp model:
+1. **Phân đoạn màu (Color In-Range in HSV):** Đọc raw RGB565 từ OV7670, chuyển sang không gian màu HSV và lọc ngưỡng các màu chủ đạo (Đỏ, Xanh, Vàng, Cam...).
+2. **Xử lý hình thái học (Morphology):** Phép Erode (khử nhiễu đốm) + Dilate (lấp lỗ hổng trong vùng nhị phân).
+3. **Tìm đốm vật thể & Bounding Box (Connected Component Labeling):** Thuật toán Two-Pass CCL thuần C (chiếm $< 20$ dòng code, không cần OpenCV), trích xuất $(x, y, w, h)$, diện tích ($Area$) và chu vi ($Perimeter$).
+4. **Nhận diện hình học (Shape Classification):**
+   - Tính hệ số tròn: $\text{Circularity} = \frac{4 \pi \times \text{Area}}{\text{Perimeter}^2}$.
+   - $\approx 1.0 \implies$ Hình tròn (Quả bóng, quả táo).
+   - $\approx 0.78 \implies$ Hình vuông/chữ nhật (Cái hộp, khối rubik).
+   - $\approx 0.60 \implies$ Hình tam giác.
+5. **Machine Learning nhẹ truyền thống (Nếu cần nhận diện phức tạp):**
+   - Dùng **HOG + Linear SVM** hoặc **Decision Tree** được export thành code C thuần bằng `micromlgen` / `emlearn` (chiếm $< 10$ KB Flash, 0 KB Tensor Arena).
+6. **Kiến trúc Dual-Mode trong Firmware C++:**
+   - Dùng cờ biên dịch: `#define USE_CLASSICAL_CV` (Tốc độ $35-60$ FPS, RAM $< 30$ KB) vs `#define USE_TINYML` (Tốc độ $15-25$ FPS, RAM $\approx 250$ KB).
+
+---
+
+## ❓ Danh sách hạng mục & Câu hỏi kỹ thuật cần giải quyết:
+1. **Pipeline Huấn Luyện trên Kaggle (GPU T4x2 / TPU):**
+   - Huấn luyện Tiny Vision Model (YOLO11n, MobileNetV2-SSD, FOMO) và mô hình đua Top (YOLO11x, RT-DETR).
+   - Lựa chọn 5 bộ dataset thử nghiệm: Pascal VOC subset, Penn-Fudan Pedestrian, Road Sign, Aquarium, và Custom Multi-class Object/Color Dataset.
+2. **Xuất & Lượng Tử Hóa Cực Hạn (Extreme Quantization):**
+   - Export PyTorch $\rightarrow$ ONNX $\rightarrow$ TensorFlow Lite INT8 (Full Integer Quantization).
+   - Tối ưu FlatBuffer Model size $< 500$ KB để nhúng vừa Flash và SRAM/PSRAM.
+3. **Cấu hình Phần Cứng ESP32-S3 & Camera OV7670:**
+   - Cấu hình chân D0-D7, PCLK, VSYNC, HREF, XCLK, SIOD/SIOC với ngoại vi `LCD_CAM` (DMA) của ESP32-S3.
+   - Xử lý trực tiếp Raw RGB565 / YUV từ OV7670 (không tốn tài nguyên giải nén JPEG như OV2640).
+4. **Module Classical CV C-native sẵn sàng:**
+   - Viết sẵn file `classical_cv.h / .c` hỗ trợ HSV thresholding, morphology và CCL để làm fallback tức thì.
+
+---
+
+## 📌 Ghi chú & Ràng buộc cốt tử:
+- **Thiết bị:** ESP32-S3 (Dual-core LX7 @ 240MHz, 512KB SRAM, 8MB Octal PSRAM), Camera **OV7670**.
+- **Chế độ hoạt động:** **100% Standalone / Offline** (Không Cloud, Không PC, Không Gateway).
+- **Bộ công cụ phát triển:** ESP-IDF / PlatformIO (C/C++), TensorFlow Lite for Microcontrollers (TFLite Micro) hoặc ESP-DL.
+- **Môi trường Python huấn luyện:** `uv` (`uv run`, `uv add`).
