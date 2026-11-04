@@ -17,7 +17,16 @@ INTENT_MAP = {
 }
 LABEL_MAP = {v: k for k, v in INTENT_MAP.items()}
 
+import unicodedata
+
+def remove_accents(text):
+    text = unicodedata.normalize('NFD', text)
+    text = re.sub(r'[\u0300-\u036f]', '', text)
+    text = text.replace('đ', 'd').replace('Đ', 'd')
+    return unicodedata.normalize('NFC', text)
+
 def clean_and_tokenize(text):
+    text = remove_accents(text)
     text = re.sub(r"[^\w\s]", " ", text.lower())
     return [w for w in text.split() if w]
 
