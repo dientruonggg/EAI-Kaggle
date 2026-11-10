@@ -40,6 +40,17 @@ venv.bak/
 *.onnx
 *.tflite
 *.h5
+*.keras
+
+# Preserve lightweight baseline models already tracked
+!qualifiers/weights/mobilenet_bbox_160/best_weights.keras
+!qualifiers/weights/text_cnn.keras
+qualifiers/weights/champion_*.keras
+qualifiers/weights/continuous_loop/
+qualifiers/weights/evolution_*/
+qualifiers/weights/kaggle_t4/
+qualifiers/weights/trial20_extended/
+qualifiers/weights/deep_trial_*/
 
 # Keep specific critical calibration/config files if needed
 !warmup/weights/tflite_micro_compat.json
@@ -54,15 +65,41 @@ warmup/data/external_coco_traffic/
 qualifiers/data/train/
 qualifiers/data/val/
 qualifiers/data/test/
+qualifiers/data_incoming/
+qualifiers/data_stress_test/
+*.zip
+*.tar
+*.tar.gz
+qualifiers/auto_download_status.json
 
 # Runs & Logs
 runs/
 warmup/runs/
 qualifiers/runs/
 *.log
+qualifiers/candidate_submissions/*.log
+qualifiers/notes/*.log
 
-# Submissions (Large CSVs can be kept or ignored, keep final csvs)
+# Submissions & Large CSV Dumps (Avoid committing 400MB+ of candidate CSVs)
 *.tmp
+qualifiers/candidate_submissions/*.csv
+qualifiers/submissions/calibrated_*.csv
+qualifiers/submissions/stress_*.csv
+qualifiers/submissions/submission_*.csv
+qualifiers/submissions/test_preds_*.csv
+qualifiers/submissions/test_sweetspot_*.csv
+qualifiers/submissions/val_detection_preds*.csv
+submission.csv
+qualifiers/submission.csv
+
+# Audio / Multimedia Recordings
+*.wav
+*.mp3
+*.ogg
+qualifiers/notes/audio_chunks/
+
+# Agent teamwork workspace & scratch
+.agents/teamwork/
 
 # Spec Kit
 .specify/.env

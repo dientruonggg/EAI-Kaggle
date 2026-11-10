@@ -10,7 +10,7 @@ import time
 import csv
 from submit import validate_submission, submit_to_kaggle
 
-PROJECT_ROOT = "/home/bim/Projects/EAI-2026/qualifiers"
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT", os.path.abspath(os.path.dirname(__file__)))
 
 def read_csv_rows(csv_path):
     rows = []

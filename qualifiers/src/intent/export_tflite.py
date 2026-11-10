@@ -17,27 +17,24 @@ from tensorflow.keras import layers, models
 MAX_MODEL_SIZE_KB = 1500  # 1.5 MB limit
 MAX_PARAMS = 200000
 
-def build_keras_text_cnn(vocab_size, max_len=30, embed_dim=32, num_filters=16, num_classes=5):
+def build_keras_text_cnn(vocab_size, max_len=30, embed_dim=32, num_filters=16, filter_sizes=(3, 5, 7), num_classes=5):
     inputs = layers.Input(shape=(max_len,), dtype=tf.int32, name="input_ids")
     
     # Embedding layer
     emb = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim, input_length=max_len, name="embedding")(inputs)
     
-    # 3 parallel 1D conv filters
-    conv3 = layers.Conv1D(num_filters, 2, padding="valid", activation="relu", name="conv_k2")(emb)
-    pool3 = layers.GlobalMaxPooling1D(name="pool_k2")(conv3)
+    # Odd-kernel 1D conv filters for symmetric context analysis
+    pooled_outputs = []
+    for k in filter_sizes:
+        conv = layers.Conv1D(num_filters, k, padding="same", activation="relu", name=f"conv_k{k}")(emb)
+        pool = layers.GlobalMaxPooling1D(name=f"pool_k{k}")(conv)
+        pooled_outputs.append(pool)
     
-    conv4 = layers.Conv1D(num_filters, 3, padding="valid", activation="relu", name="conv_k3")(emb)
-    pool4 = layers.GlobalMaxPooling1D(name="pool_k3")(conv4)
-    
-    conv5 = layers.Conv1D(num_filters, 4, padding="valid", activation="relu", name="conv_k4")(emb)
-    pool5 = layers.GlobalMaxPooling1D(name="pool_k4")(conv5)
-    
-    fused = layers.Concatenate(name="concat")([pool3, pool4, pool5])
+    fused = layers.Concatenate(name="concat")(pooled_outputs)
     drop = layers.Dropout(0.2, name="dropout")(fused)
     outputs = layers.Dense(num_classes, activation="softmax", name="logits")(drop)
     
-    model = models.Model(inputs=inputs, outputs=outputs, name="TextCNN_Micro")
+    model = models.Model(inputs=inputs, outputs=outputs, name="TextCNN_OddKernels_Micro")
     return model
 
 def convert_to_tflite_int8(keras_model, representative_samples, output_tflite_path):

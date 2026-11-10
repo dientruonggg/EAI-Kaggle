@@ -22,6 +22,7 @@
   1. Validate against `sample_submission.csv` (exact column headers, row IDs, formatting).
   2. Inspect total detection count ($N$). For the 60-image test set, ensure $2,600 <= N <= 2,800$ (43–47 boxes/img). Reject submissions outside this range unless calibrated on local validation.
   3. Precomputed Intent predictions (`submissions/intent_preds.csv`) must be strictly merged (Score 30.00/30.00).
+  4. Submission Filename Standard: Kaggle submission file MUST strictly be named `submission.csv`. The continuous optimization pipeline automatically mirrors the top champion candidate to `submission.csv` at project root.
 
 ## 5. Kaggle T4x2 Remote Workflow
 - For datasets > 500 images, execute training remotely via `warmup/kaggle_runner/run_remote_train.py` on dual T4 GPUs.

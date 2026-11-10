@@ -57,7 +57,7 @@ class TextCNNDataset(Dataset):
         return x
 
 class TextCNN(nn.Module):
-    def __init__(self, vocab_size, embed_dim=32, num_filters=16, filter_sizes=(2, 3, 4), num_classes=5, dropout=0.2):
+    def __init__(self, vocab_size, embed_dim=32, num_filters=16, filter_sizes=(3, 5, 7), num_classes=5, dropout=0.2):
         super(TextCNN, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         self.convs = nn.ModuleList([

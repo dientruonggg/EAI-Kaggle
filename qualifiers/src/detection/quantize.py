@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
-PROJECT_ROOT = "/home/bim/Projects/EAI-2026/qualifiers"
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -88,11 +88,19 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Quantize detector to Full INT8 TFLite")
     parser.add_argument("--img_size", type=int, default=160)
+    parser.add_argument("--weights", default=os.path.join(PROJECT_ROOT, "weights/mobilenet_bbox_160/best_weights.keras"))
     parser.add_argument("--output", default=os.path.join(PROJECT_ROOT, "weights/mobilenet_bbox_160_int8.tflite"))
     args = parser.parse_args()
 
-    model = build_mobilenet_bbox_model(input_shape=(args.img_size, args.img_size, 3), alpha=0.35)
+    model = build_mobilenet_bbox_model(input_shape=(args.img_size, args.img_size, 3))
     
+    if os.path.exists(args.weights):
+        print(f"[*] Loading trained weights from: {args.weights}")
+        model.load_weights(args.weights)
+        print("[✔] Successfully loaded trained weights into detector model.")
+    else:
+        print(f"[!] Warning: Weights path not found ({args.weights}). Quantizing initialized weights.")
+
     # Try finding real training images for representative calibration
     train_imgs = glob.glob(os.path.join(PROJECT_ROOT, "data/train/images/*.png")) + \
                  glob.glob(os.path.join(PROJECT_ROOT, "data/train/images/*.jpg"))

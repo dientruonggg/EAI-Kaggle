@@ -67,25 +67,28 @@ def encode_texts(texts, vocab, max_len=30):
         encoded.append(tokens)
     return np.array(encoded, dtype=np.int32)
 
-def build_keras_model(vocab_size, max_len=30, embed_dim=32, num_filters=16, num_classes=5):
+def build_keras_model(vocab_size, max_len=30, embed_dim=32, num_filters=16, filter_sizes=(3, 5, 7), num_classes=5):
+    """
+    TextCNN with odd 1D convolution kernels (3, 5, 7) for symmetric context modeling:
+      - k=3: 3-gram triggers ('co bao nhieu', 'o dau', 'co khong')
+      - k=5: 5-gram patterns ('hay dem so vat the', 'vi tri cua cai hop')
+      - k=7: Full question structure & long-range intents
+    GlobalMaxPooling1D captures the most salient intent signal across time.
+    """
     inputs = layers.Input(shape=(max_len,), dtype="int32", name="input_ids")
     emb = layers.Embedding(vocab_size, embed_dim, name="embedding")(inputs)
     
-    # Multi-scale 1D CNN with kernel sizes 2, 3, 4
-    c2 = layers.Conv1D(num_filters, 2, activation="relu", padding="valid", name="conv_k2")(emb)
-    p2 = layers.GlobalMaxPooling1D(name="pool_k2")(c2)
+    pooled_outputs = []
+    for k in filter_sizes:
+        conv = layers.Conv1D(num_filters, k, activation="relu", padding="same", name=f"conv_k{k}")(emb)
+        pool = layers.GlobalMaxPooling1D(name=f"pool_k{k}")(conv)
+        pooled_outputs.append(pool)
     
-    c3 = layers.Conv1D(num_filters, 3, activation="relu", padding="valid", name="conv_k3")(emb)
-    p3 = layers.GlobalMaxPooling1D(name="pool_k3")(c3)
-    
-    c4 = layers.Conv1D(num_filters, 4, activation="relu", padding="valid", name="conv_k4")(emb)
-    p4 = layers.GlobalMaxPooling1D(name="pool_k4")(c4)
-    
-    concat = layers.Concatenate(name="concat")([p2, p3, p4])
+    concat = layers.Concatenate(name="concat")(pooled_outputs)
     drop = layers.Dropout(0.2, name="dropout")(concat)
     outputs = layers.Dense(num_classes, activation="softmax", name="logits")(drop)
     
-    model = models.Model(inputs=inputs, outputs=outputs, name="TextCNN_Vietnamese")
+    model = models.Model(inputs=inputs, outputs=outputs, name="TextCNN_OddKernels_Vietnamese")
     return model
 
 def load_data(csv_path):
