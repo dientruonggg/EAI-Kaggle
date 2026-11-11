@@ -1,0 +1,33 @@
+{
+  "best_epoch": 45,
+  "params_keras": 191579,
+  "params_folded": 184395,
+  "size_kb": 270.3,
+  "map50_fp32": 0.9532,
+  "map50_int8": 0.9522,
+  "input_quant": [
+    0.003921568859368563,
+    -128
+  ],
+  "ops": [
+    "ADD",
+    "CONCATENATION",
+    "CONV_2D",
+    "DEPTHWISE_CONV_2D",
+    "RESIZE_NEAREST_NEIGHBOR"
+  ],
+  "img": [
+    320,
+    240
+  ],
+  "preprocessing": "RGB, resize INTER_AREA (neu != 320x240), pixel/255 roi luong tu hoa int8: q=round(x/scale)+zp",
+  "decode": {
+    "stride": 8,
+    "max_dist": 20.0,
+    "nms_iou": 0.6,
+    "max_det": 100,
+    "output": "cls logits -> sigmoid ; box raw -> sigmoid*max_dist*stride = ltrb quanh tam o"
+  },
+  "seed": 42,
+  "fold": 0
+}
