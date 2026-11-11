@@ -1,0 +1,25 @@
+{
+  "epoch": 100,
+  "map50": 0.968498204705903,
+  "per_class_ap": {
+    "bottle": 0.9878,
+    "cup": 0.98,
+    "phone": 0.9591,
+    "book": 0.9613,
+    "mouse": 0.9482,
+    "box": 0.9948,
+    "toy_car": 0.9483
+  },
+  "meta": {
+    "IMG_W": 320,
+    "IMG_H": 240,
+    "STRIDE": 8,
+    "MAX_DIST": 20.0,
+    "NUM_CLASSES": 7,
+    "HEAD_CH": 96,
+    "USE_P2": true,
+    "FOLD": 0,
+    "SEED": 42
+  },
+  "params_strict": 191579
+}
