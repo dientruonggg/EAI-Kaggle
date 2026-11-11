@@ -1,0 +1,36 @@
+{
+  "model_path": "/home/dutai/EAI-2026/qualifiers/weights/rect_240x320_champion/model_int8.tflite",
+  "base_thresholds": [
+    0.01,
+    0.006,
+    0.006,
+    0.01,
+    0.006,
+    0.022,
+    0.006
+  ],
+  "optimal_scale": 3.5,
+  "calibrated_thresholds": [
+    0.035,
+    0.021,
+    0.021,
+    0.035,
+    0.021,
+    0.077,
+    0.021
+  ],
+  "class_names": [
+    "bottle",
+    "cup",
+    "phone",
+    "book",
+    "mouse",
+    "box",
+    "toy_car"
+  ],
+  "target_range": [
+    173332,
+    186668
+  ],
+  "total_detections": 220316
+}

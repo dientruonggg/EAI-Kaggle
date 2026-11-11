@@ -76,18 +76,20 @@ def extract_image_candidates(model_path, image_paths, floor_thresh=0.02):
         conf_det = next((d for d in out_dets if d["shape"][-1] == 1), None)
         cls_det = next((d for d in out_dets if d["shape"][-1] in (NUM_CLASSES, NUM_CLASSES + 1)), None)
         box_det = next((d for d in out_dets if d["shape"][-1] == 4), None)
-        grid_size = box_det["shape"][1]
+        grid_h, grid_w = box_det["shape"][1], box_det["shape"][2]
         keras_model = None
     else:
-        from src.detection.losses import decoupled_conf_loss, decoupled_cls_loss, decoupled_box_loss
+        from src.detection.losses import decoupled_conf_loss, decoupled_cls_loss, decoupled_ciou_loss
         custom_objects = {
             "decoupled_conf_loss": decoupled_conf_loss,
             "decoupled_cls_loss": decoupled_cls_loss,
-            "decoupled_box_loss": decoupled_box_loss
+            "decoupled_ciou_loss": decoupled_ciou_loss,
+            "decoupled_box_loss": decoupled_ciou_loss
         }
         keras_model = tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
-        img_h, img_w = 160, 160
-        grid_size = 20
+        img_h, img_w = keras_model.input_shape[1], keras_model.input_shape[2]
+        box_out_shape = keras_model.output_shape["box_output"] if isinstance(keras_model.output_shape, dict) else keras_model.output_shape[2]
+        grid_h, grid_w = box_out_shape[1], box_out_shape[2]
         interp = None
 
     def dequant(d):
@@ -130,8 +132,8 @@ def extract_image_candidates(model_path, image_paths, floor_thresh=0.02):
             p_box = preds["box_output"].numpy()[0]
 
         candidates = []
-        for gy in range(grid_size):
-            for gx in range(grid_size):
+        for gy in range(grid_h):
+            for gx in range(grid_w):
                 if p_conf is not None:
                     c_val = float(p_conf[gy, gx, 0])
                     c_prob = p_cls[gy, gx]
@@ -150,8 +152,8 @@ def extract_image_candidates(model_path, image_paths, floor_thresh=0.02):
                     continue
 
                 off_x, off_y, bw, bh = p_box[gy, gx]
-                cx_norm = (gx + off_x) / float(grid_size)
-                cy_norm = (gy + off_y) / float(grid_size)
+                cx_norm = (gx + off_x) / float(grid_w)
+                cy_norm = (gy + off_y) / float(grid_h)
 
                 xmin = max(0.0, (cx_norm - bw / 2.0) * ORIG_W)
                 ymin = max(0.0, (cy_norm - bh / 2.0) * ORIG_H)

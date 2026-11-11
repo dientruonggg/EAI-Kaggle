@@ -241,7 +241,7 @@ def run_deep_convergence_training(
         "cls_output": decoupled_cls_loss,
         "box_output": decoupled_ciou_loss
     }
-    loss_weights = {"conf_output": 1.0, "cls_output": 2.8, "box_output": 3.8}
+    loss_weights = {"conf_output": 1.0, "cls_output": 2.5, "box_output": 5.0}
 
     model.compile(optimizer=opt, loss=losses, loss_weights=loss_weights, jit_compile=False)
 

@@ -159,8 +159,26 @@ class QualifierDetectionDataset(tf.keras.utils.Sequence):
                  num_classes=NUM_CLASSES):
         self.image_paths = image_paths
         self.labels_dir = labels_dir
-        self.img_size = img_size
-        self.grid_size = grid_size
+
+        if isinstance(img_size, (tuple, list)):
+            self.img_h, self.img_w = int(img_size[0]), int(img_size[1])
+            self.img_size = img_size
+        else:
+            self.img_h, self.img_w = int(img_size), int(img_size)
+            self.img_size = int(img_size)
+
+        if isinstance(grid_size, (tuple, list)):
+            self.grid_h, self.grid_w = int(grid_size[0]), int(grid_size[1])
+            self.grid_size = grid_size
+        elif grid_size is None:
+            self.grid_h = self.img_h // 8
+            self.grid_w = self.img_w // 8
+            self.grid_size = (self.grid_h, self.grid_w)
+        else:
+            self.grid_h = int(grid_size)
+            self.grid_w = int(grid_size)
+            self.grid_size = int(grid_size)
+
         self.batch_size = batch_size
         self.augment = augment
         self.augment_occlusion = augment_occlusion
@@ -226,23 +244,26 @@ class QualifierDetectionDataset(tf.keras.utils.Sequence):
                 img = np.fliplr(img)
                 boxes = [(cid, 1.0 - cx, cy, w, h) for (cid, cx, cy, w, h) in boxes]
 
-            # Resize to model input shape
-            resized = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_AREA)
+            # Resize to model input shape (cv2.resize expects (width, height))
+            if img.shape[0] != self.img_h or img.shape[1] != self.img_w:
+                resized = cv2.resize(img, (self.img_w, self.img_h), interpolation=cv2.INTER_AREA)
+            else:
+                resized = img
             norm_img = resized.astype(np.float32) / 255.0
 
-            # Target grids
-            conf_grid = np.zeros((self.grid_size, self.grid_size, 1), dtype=np.float32)
-            cls_grid = np.zeros((self.grid_size, self.grid_size, self.num_classes + 1), dtype=np.float32)
-            box_grid = np.zeros((self.grid_size, self.grid_size, 5), dtype=np.float32)
+            # Target grids: (grid_h, grid_w, channels)
+            conf_grid = np.zeros((self.grid_h, self.grid_w, 1), dtype=np.float32)
+            cls_grid = np.zeros((self.grid_h, self.grid_w, self.num_classes + 1), dtype=np.float32)
+            box_grid = np.zeros((self.grid_h, self.grid_w, 5), dtype=np.float32)
 
             for cid, cx, cy, w, h in boxes:
-                gx = int(cx * self.grid_size)
-                gy = int(cy * self.grid_size)
-                gx = min(max(gx, 0), self.grid_size - 1)
-                gy = min(max(gy, 0), self.grid_size - 1)
+                gx = int(cx * self.grid_w)
+                gy = int(cy * self.grid_h)
+                gx = min(max(gx, 0), self.grid_w - 1)
+                gy = min(max(gy, 0), self.grid_h - 1)
 
-                offset_x = (cx * self.grid_size) - gx
-                offset_y = (cy * self.grid_size) - gy
+                offset_x = (cx * self.grid_w) - gx
+                offset_y = (cy * self.grid_h) - gy
 
                 conf_grid[gy, gx, 0] = 1.0
                 cls_grid[gy, gx, cid] = 1.0

@@ -15,7 +15,7 @@ ORIG_W = 320.0
 ORIG_H = 240.0
 NUM_CLASSES = 7
 DEFAULT_CONF_THRESH = 0.12
-CALIBRATED_PER_CLASS_THRESH = [0.12, 0.12, 0.12, 0.12, 0.10, 0.12, 0.12]
+CALIBRATED_PER_CLASS_THRESH = [0.12, 0.12, 0.13, 0.12, 0.15, 0.11, 0.13]
 
 def parse_conf_thresh(conf_thresh, num_classes=NUM_CLASSES):
     """

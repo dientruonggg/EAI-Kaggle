@@ -146,19 +146,29 @@ def decoupled_conf_loss(y_true, y_pred, gamma=2.0, alpha=0.75):
     num_pos = tf.maximum(1.0, tf.reduce_sum(y_true))
     return tf.reduce_sum(focal_weight * bce) / num_pos
 
-def decoupled_cls_loss(y_true, y_pred):
+def decoupled_cls_loss(y_true, y_pred, label_smoothing=0.05):
     """
-    Masked Multiclass Cross-Entropy with Error & Query-Ratio weights.
+    Masked Multiclass Cross-Entropy with Soft-Label Smoothing & Adaptive Error Weights.
     Only computes loss on cells containing an object (conf_mask == 1).
+    Applies label smoothing: y_smooth = y * (1 - eps) + eps / K to mitigate overconfidence,
+    resolve visually ambiguous class confusion (phone vs mouse/toy_car),
+    and preserve dynamic range for INT8 quantization.
     y_true: (batch, grid, grid, 8) -> [7 classes one-hot, 1 conf_mask]
     y_pred: (batch, grid, grid, 7) -> softmax probabilities over 7 classes
     """
     cls_true = y_true[..., 0:7]
     conf_mask = y_true[..., 7:8]
     eps = 1e-7
+
+    # Apply soft-label smoothing across the 7 classes
+    if label_smoothing > 0.0:
+        cls_smoothed = cls_true * (1.0 - label_smoothing) + (label_smoothing / 7.0)
+    else:
+        cls_smoothed = cls_true
+
     y_pred = tf.clip_by_value(y_pred, eps, 1.0 - eps)
 
-    ce = -tf.reduce_sum(cls_true * tf.math.log(y_pred), axis=-1, keepdims=True)
+    ce = -tf.reduce_sum(cls_smoothed * tf.math.log(y_pred), axis=-1, keepdims=True)
     sample_w = tf.reduce_sum(cls_true * DYNAMIC_CLASS_WEIGHTS_VAR, axis=-1, keepdims=True)
 
     masked_loss = ce * sample_w * conf_mask

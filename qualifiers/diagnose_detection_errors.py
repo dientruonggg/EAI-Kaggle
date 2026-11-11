@@ -73,9 +73,9 @@ def run_diagnosis(model_path, model_type="v2", val_dir=None, conf_thresh=0.12, i
         use_tflite = True
     else:
         if model_type == "v3":
-            model = build_micro_edge_ultra_v3(num_classes=7, grid_size=20)
+            model = build_micro_edge_ultra_v3(num_classes=7)
         else:
-            model = build_micro_edge_ultra_v2(num_classes=7, grid_size=20)
+            model = build_micro_edge_ultra_v2(num_classes=7)
         model.load_weights(model_path)
         use_tflite = False
 
