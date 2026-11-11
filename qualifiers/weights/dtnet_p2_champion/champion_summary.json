@@ -1,0 +1,61 @@
+{
+  "model_name": "DTNet-P2 (Ultra Champion)",
+  "architecture": {
+    "input_shape": [240, 320, 3],
+    "grid_shape": [30, 40],
+    "stride": 8,
+    "head_channels": 96,
+    "use_p2_stride4": true,
+    "loss": "Quality Focal Loss (QFL beta=2.0) + CIoU Loss on LTRB offsets"
+  },
+  "hardware_compliance": {
+    "parameters_strict": 191579,
+    "parameter_limit": 200000,
+    "safety_margin_parameters": 8421,
+    "int8_flash_size_kb": 266.0,
+    "flash_budget_kb": 1536.0,
+    "tflm_operators": [
+      "CONV_2D",
+      "DEPTHWISE_CONV_2D",
+      "ADD",
+      "CONCATENATION",
+      "RESIZE_NEAREST_NEIGHBOR",
+      "RELU6"
+    ],
+    "quantization": "Full Integer INT8 (int8 in / int8 out)",
+    "single_model_invariant": true,
+    "zero_ensemble_zero_tta": true
+  },
+  "evaluation_metrics": {
+    "val_map50_fp32_best_epoch": 0.9758,
+    "val_map50_int8_base": 0.9798,
+    "val_map50_int8_sweetspot_calibrated": 0.9798,
+    "intent_accuracy": 1.0000,
+    "total_contest_score": 98.59,
+    "per_class_ap50": {
+      "box": 0.9973,
+      "bottle": 0.9925,
+      "cup": 0.9860,
+      "phone": 0.9804,
+      "mouse": 0.9712,
+      "book": 0.9677,
+      "toy_car": 0.9639
+    },
+    "calibrated_thresholds": {
+      "bottle": 0.05,
+      "cup": 0.05,
+      "phone": 0.07,
+      "book": 0.04,
+      "mouse": 0.05,
+      "box": 0.05,
+      "toy_car": 0.03
+    }
+  },
+  "submission": {
+    "total_rows": 8000,
+    "detection_rows": 4000,
+    "intent_rows": 4000,
+    "total_boxes_detected": 170707,
+    "avg_boxes_per_image": 42.68
+  }
+}

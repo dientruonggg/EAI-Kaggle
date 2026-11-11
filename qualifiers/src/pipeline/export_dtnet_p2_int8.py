@@ -23,9 +23,11 @@ import os
 import sys
 from pathlib import Path
 
+# Add project root to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 import cv2
 import numpy as np
-import pandas as pd
 import torch
 import tensorflow as tf
 import keras
@@ -184,6 +186,44 @@ def evaluate_map(dets, gts, num_classes=NUM_CLASSES, iou_thr=0.5):
     return (float(np.mean(list(aps.values()))) if aps else 0.0), aps
 
 
+class DTNet(torch.nn.Module):
+    def __init__(self, spec, max_dist=20.0):
+        super().__init__()
+        self.spec = spec
+        self.max_dist = max_dist
+        self.mods = torch.nn.ModuleDict()
+        for op in spec:
+            if op["t"] in ("conv", "dw"):
+                k, s = op["k"], op["s"]
+                pad = (k - 1) // 2 if s == 1 else 0
+                groups = op["cin"] if op["t"] == "dw" else 1
+                self.mods[op["name"]] = torch.nn.Conv2d(op["cin"], op["cout"], k, s, pad, groups=groups, bias=op["bias"])
+                if op["bn"]:
+                    self.mods[op["name"] + "_bn"] = torch.nn.BatchNorm2d(op["cout"], eps=1e-5, momentum=0.1)
+
+    def forward(self, x):
+        t = {"input": x}
+        for op in self.spec:
+            ty, n = op["t"], op["name"]
+            if ty in ("conv", "dw"):
+                y = t[op["src"]]
+                if op["s"] == 2 and op["k"] == 3:
+                    y = torch.nn.functional.pad(y, (0, 1, 0, 1))
+                y = self.mods[n](y)
+                if op["bn"]:
+                    y = self.mods[n + "_bn"](y)
+                if op["act"]:
+                    y = torch.nn.functional.relu6(y)
+            elif ty == "add":
+                y = t[op["srcs"][0]] + t[op["srcs"][1]]
+            elif ty == "cat":
+                y = torch.cat([t[s] for s in op["srcs"]], 1)
+            elif ty == "up":
+                y = torch.nn.functional.interpolate(t[op["src"]], scale_factor=2, mode="nearest")
+            t[n] = y
+        return t["cls_out"], t["box_out"]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Export DTNet-P2 PyTorch weights to Full INT8 TFLite & Calibrate")
     parser.add_argument("--checkpoint", required=True, help="Path to best_p2.pt checkpoint")
@@ -201,7 +241,6 @@ def main():
     print("=" * 80)
 
     # 1. Load PyTorch model
-    from qualifiers.src.pipeline.train_dtnet_p2_champion import DTNet
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     spec = ck["spec"]
     model = DTNet(spec)
@@ -376,18 +415,18 @@ def main():
         sub_rows.append(("DETECTION", sid, json.dumps(boxes_json, separators=(",", ":"))))
 
     # Add Intent rows
-    intent_df = None
+    intent_rows = []
     for cand in [project_root / "intent_only_submission.csv", project_root / "submission.csv"]:
         if cand.exists():
-            df = pd.read_csv(cand)
-            if "task_type" in df.columns:
-                df = df[df["task_type"] == "INTENT"]
-            if len(df) >= 4000:
-                intent_df = df
+            with open(cand, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                for row in reader:
+                    if len(row) >= 3 and row[0] == "INTENT":
+                        intent_rows.append(("INTENT", str(row[1]), str(row[2])))
+            if len(intent_rows) >= 4000:
                 break
-    if intent_df is not None:
-        for _, r in intent_df.iterrows():
-            sub_rows.append(("INTENT", str(r["sample_id"]), str(r["prediction"])))
+    sub_rows.extend(intent_rows[:4000])
 
     out_csv = Path(args.submission_out)
     with open(out_csv, "w", newline="", encoding="utf-8") as f:

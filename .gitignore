@@ -108,4 +108,4 @@ qualifiers/notes/audio_chunks/
 .specify/logs/
 
 
-.env
+.envqualifiers/weights/dtnet_p2_champion/*.csv
