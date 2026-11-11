@@ -1,10 +1,10 @@
 {
-  "best_epoch": 100,
+  "best_epoch": 392,
   "params_keras": 191579,
   "params_folded": 184395,
   "size_kb": 270.3,
-  "map50_fp32": 0.9685,
-  "map50_int8": 0.9681,
+  "map50_fp32": 0.9802,
+  "map50_int8": 0.9789,
   "input_quant": [
     0.003921568859368563,
     -128

@@ -116,3 +116,6 @@ qualifiers/notes/audio_chunks/
 
 .env
 qualifiers/weights/dtnet_p2_champion/*.csv
+
+
+.vscode/
