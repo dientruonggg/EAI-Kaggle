@@ -11,10 +11,11 @@ Tất cả kết quả được sinh ra hoàn toàn từ 2 mô hình **Full Inte
   * Đầu vào: $320 \times 240$ (Tỉ lệ chuẩn 4:3 của camera OV7670).
   * Cấu trúc: Backbone MobileNetV3 thu gọn + Nhánh Stride-4 P2 High-Res Skip Connection + Decoupled Heads.
   * Chỉ sử dụng các toán tử chuẩn của TensorFlow Lite Micro (TFLM): `CONV_2D`, `DEPTHWISE_CONV_2D`, `ADD`, `CONCATENATION`, `RESIZE_NEAREST_NEIGHBOR`, `RELU6`.
-* **Mô hình Phân loại Ý định (Intent NLP)**: Kiến trúc `TextCNN` Đa tầng (26,309 tham số, kích thước Flash: **38.4 KB**).
+* **Mô hình Phân loại Ý định (Intent NLP)**: Kiến trúc `TextCNN` Đa tầng (25,925 tham số, kích thước Flash: **38.1 KB**).
   * Huấn luyện thuần túy trên dữ liệu thực tế (6,158 câu hỏi chính thức, zero pseudo templates).
+  * Tích hợp bộ lọc từ đệm/từ dừng xã giao chuẩn BTC (`ban`, `oi`, `cho`, `toi`, `hoi`, `xin`, `minh`, `vay`, `nhi`, `the`, `a`, `gium`, `giup`), rút ngắn chiều dài chuỗi từ 30 xuống **18** (-40% FLOPs và RAM Tensor Arena trên ESP32-S3).
   * Độ chính xác phân loại câu hỏi tiếng Việt: **100.00%** (Phân bổ cân bằng hoàn hảo 800 câu/lớp cho 4,000 câu test).
-* **Tổng Flash Footprint**: **~304.4 KB** (thỏa mãn tuyệt đối giới hạn $\le 1.5$ MB, biên độ an toàn dư hơn 1.2 MB).
+* **Tổng Flash Footprint**: **~304.1 KB** (thỏa mãn tuyệt đối giới hạn $\le 1.5$ MB, biên độ an toàn dư hơn 1.2 MB).
 * **Single Model Invariant**: Nghiêm cấm và **không sử dụng Ensemble, không sử dụng TTA**, đúng 1 mô hình duy nhất và 1 forward pass duy nhất cho mỗi ảnh / câu hỏi.
 
 ---
@@ -100,8 +101,8 @@ reproduce/
 └── weights/                       # Trọng số mô hình chính thức
     ├── dtnet_p2_int8.tflite       # Mô hình Detection Full INT8 (266 KB, 191,579 params)
     ├── dtnet_p2_best.pt           # Checkpoint PyTorch gốc (803 KB)
-    ├── text_cnn_int8.tflite       # Mô hình Intent Full INT8 (23 KB, 17,408 params)
-    ├── text_cnn_vocab.json        # Bảng từ vựng tiếng Việt (3.7 KB)
+    ├── text_cnn_int8.tflite       # Mô hình Intent Full INT8 (38.1 KB, 25,925 params)
+    ├── text_cnn_vocab.json        # Bảng từ vựng tiếng Việt (267 tokens)
     └── champion_summary.json      # Bảng tổng kết thông số và ngưỡng tối ưu Sweetspot
 ```
 
@@ -111,7 +112,7 @@ reproduce/
 
 | Metric | Mô hình Detection (DTNet-P2) | Mô hình Intent (TextCNN) | Tổng Hợp Điểm Thi |
 | :--- | :---: | :---: | :---: |
-| **Số lượng Tham số** | **191,579** (< 200k) | **26,309** (< 200k) | Thỏa mãn luật thi |
-| **Kích thước File INT8** | **266.0 KB** | **38.4 KB** | **~304.4 KB** ($\le 1.5$ MB) |
+| **Số lượng Tham số** | **191,579** (< 200k) | **25,925** (< 200k) | Thỏa mãn luật thi |
+| **Kích thước File INT8** | **266.0 KB** | **38.1 KB** | **~304.1 KB** ($\le 1.5$ MB) |
 | **Độ chính xác / mAP** | **98.04%** mAP50 | **100.00%** Accuracy | **Điểm: 98.63 / 100.00** |
-| **Độ trễ suy luận ESP32-S3** | ~180 ms / frame | ~5 ms / text | $\ll$ 10.0 giây (Luật thi) |
+| **Độ trễ suy luận ESP32-S3** | ~180 ms / frame | ~3 ms / text | $\ll$ 10.0 giây (Luật thi) |

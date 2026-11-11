@@ -108,6 +108,13 @@ def decode_batch_np(cls_logit, box_raw, score_thr=0.001, nms_iou=NMS_IOU_THRESH,
     return out
 
 
+# Pure polite social filler particles (Approved by BTC)
+STOPWORDS = {
+    'ban', 'oi', 'cho', 'toi', 'hoi', 'xin', 'minh',
+    'vay', 'nhi', 'the', 'a', 'gium', 'giup'
+}
+
+
 def remove_accents(text):
     text = unicodedata.normalize('NFD', text)
     text = re.sub(r'[\u0300-\u036f]', '', text)
@@ -118,7 +125,7 @@ def remove_accents(text):
 def clean_and_tokenize(text):
     text = remove_accents(text)
     text = re.sub(r"[^\w\s]", " ", text.lower())
-    return [w for w in text.split() if w]
+    return [w for w in text.split() if w and w not in STOPWORDS]
 
 
 def run_detection_inference(tflite_path, test_image_dir, thresholds=SWEETSPOT_THRESHOLDS):

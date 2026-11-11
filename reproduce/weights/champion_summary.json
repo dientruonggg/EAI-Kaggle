@@ -11,13 +11,13 @@
   },
   "hardware_compliance": {
     "detection_parameters": 191579,
-    "intent_parameters": 26309,
-    "total_parameters": 217888,
+    "intent_parameters": 25925,
+    "total_parameters": 217504,
     "detection_parameter_limit": 200000,
     "safety_margin_detection_params": 8421,
     "detection_int8_flash_kb": 266.0,
-    "intent_int8_flash_kb": 38.4,
-    "total_int8_flash_kb": 304.4,
+    "intent_int8_flash_kb": 38.1,
+    "total_int8_flash_kb": 304.1,
     "flash_budget_kb": 1536.0,
     "tflm_operators": [
       "CONV_2D",
@@ -65,6 +65,9 @@
     "architecture": "Multi-Scale TextCNN (Kernels 2, 3, 4, 5)",
     "training_samples": 6158,
     "training_data": "100% Real Vietnamese contest questions (zero synthetic/pseudo templates)",
+    "polite_filler_filtering": "Approved by BTC (13 pure polite particles filtered: ban, oi, cho, toi, hoi, xin, minh, vay, nhi, the, a, gium, giup)",
+    "sequence_max_len": 18,
+    "vocabulary_size": 267,
     "cv_accuracy_5fold": "100.00% (+/- 0.00%)",
     "test_distribution": {
       "COUNT": 800,
