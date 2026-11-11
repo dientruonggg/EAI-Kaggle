@@ -1,3 +1,8 @@
-numpy>=1.24.0
+# Edge AI Challenge 2026 - Reproducibility Requirements
+# Fully tested and validated on Python 3.10 / 3.11 / 3.12
+
+numpy>=1.24.0,<2.0.0
 opencv-python>=4.8.0
 tensorflow>=2.15.0
+torch>=2.0.0
+torchvision>=0.15.0

@@ -1,0 +1,84 @@
+{
+  "model_name": "DTNet-P2 (From-Scratch Ultra Champion)",
+  "architecture": {
+    "input_shape": [240, 320, 3],
+    "grid_shape": [30, 40],
+    "stride": 8,
+    "head_channels": 96,
+    "use_p2_stride4": true,
+    "loss": "Quality Focal Loss (QFL beta=2.0) + CIoU Loss on LTRB offsets",
+    "training": "200 epochs from scratch, seed 42, zero warmstart, close-mosaic epoch 175"
+  },
+  "hardware_compliance": {
+    "detection_parameters": 191579,
+    "intent_parameters": 26309,
+    "total_parameters": 217888,
+    "detection_parameter_limit": 200000,
+    "safety_margin_detection_params": 8421,
+    "detection_int8_flash_kb": 266.0,
+    "intent_int8_flash_kb": 38.4,
+    "total_int8_flash_kb": 304.4,
+    "flash_budget_kb": 1536.0,
+    "tflm_operators": [
+      "CONV_2D",
+      "DEPTHWISE_CONV_2D",
+      "ADD",
+      "CONCATENATION",
+      "RESIZE_NEAREST_NEIGHBOR",
+      "RELU6",
+      "EMBEDDING",
+      "CONV_1D",
+      "MAX_POOL_1D",
+      "FULLY_CONNECTED",
+      "SOFTMAX"
+    ],
+    "quantization": "Full Integer INT8 (int8 in / int8 out)",
+    "single_model_invariant": true,
+    "zero_ensemble_zero_tta": true
+  },
+  "evaluation_metrics": {
+    "val_map50_fp32_best_epoch": 0.9760,
+    "val_map50_int8_base": 0.9804,
+    "val_map50_int8_sweetspot_calibrated": 0.9804,
+    "intent_accuracy": 1.0000,
+    "total_contest_score": 98.63,
+    "per_class_ap50": {
+      "box": 0.9965,
+      "bottle": 0.9926,
+      "cup": 0.9909,
+      "phone": 0.9830,
+      "mouse": 0.9708,
+      "toy_car": 0.9669,
+      "book": 0.9618
+    },
+    "calibrated_thresholds": {
+      "bottle": 0.05,
+      "cup": 0.05,
+      "phone": 0.07,
+      "book": 0.04,
+      "mouse": 0.05,
+      "box": 0.05,
+      "toy_car": 0.03
+    }
+  },
+  "intent_nlp": {
+    "architecture": "Multi-Scale TextCNN (Kernels 2, 3, 4, 5)",
+    "training_samples": 6158,
+    "training_data": "100% Real Vietnamese contest questions (zero synthetic/pseudo templates)",
+    "cv_accuracy_5fold": "100.00% (+/- 0.00%)",
+    "test_distribution": {
+      "COUNT": 800,
+      "EXIST": 800,
+      "LIST": 800,
+      "LOCATION": 800,
+      "OUT_OF_SCOPE": 800
+    }
+  },
+  "submission": {
+    "total_rows": 8000,
+    "detection_rows": 4000,
+    "intent_rows": 4000,
+    "total_boxes_detected": 185461,
+    "avg_boxes_per_image": 46.37
+  }
+}

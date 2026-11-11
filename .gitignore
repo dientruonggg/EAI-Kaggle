@@ -45,12 +45,18 @@ venv.bak/
 # Preserve lightweight baseline models already tracked
 !qualifiers/weights/mobilenet_bbox_160/best_weights.keras
 !qualifiers/weights/text_cnn.keras
+
+# Whitelist reproduction package weights for BTC verification (<1.2MB total)
+!reproduce/weights/*.pt
+!reproduce/weights/*.tflite
+!reproduce/weights/*.json
 qualifiers/weights/champion_*.keras
 qualifiers/weights/continuous_loop/
 qualifiers/weights/evolution_*/
 qualifiers/weights/kaggle_t4/
 qualifiers/weights/trial20_extended/
 qualifiers/weights/deep_trial_*/
+qualifiers/weights/dtnet_p2_99plus/
 
 # Keep specific critical calibration/config files if needed
 !warmup/weights/tflite_micro_compat.json

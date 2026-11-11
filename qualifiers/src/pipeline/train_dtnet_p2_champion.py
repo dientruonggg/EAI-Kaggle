@@ -184,7 +184,9 @@ def count_params_strict(model):
 # --------------------------------------------------------------------------- #
 # 2. DATASET & TARGET ASSIGNMENT
 # --------------------------------------------------------------------------- #
-def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.0, rad_scale=0.3):
+def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.5, rad_scale=0.3):
+    """Aspect-ratio aware elliptical center sampling: provides full supervisory
+    coverage across elongated objects (book, toy_car, mouse), eliminating boundary near-misses."""
     cls_idx = np.full((gh, gw), -1, dtype=np.int64)
     box_t = np.zeros((4, gh, gw), dtype=np.float32)
     best_area = np.full((gh, gw), np.inf, dtype=np.float32)
@@ -195,16 +197,20 @@ def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.0, rad_scale=0.3):
         cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
         ci = min(max(int(cx // stride), 0), gw - 1)
         cj = min(max(int(cy // stride), 0), gh - 1)
-        r = float(np.clip(rad_scale * min(w, h) / stride, min_r, max_r))
-        reach = int(math.ceil(r))
+        rx = float(np.clip(rad_scale * w / stride, min_r, max_r))
+        ry = float(np.clip(rad_scale * h / stride, min_r, max_r))
+        reach_x = int(math.ceil(rx))
+        reach_y = int(math.ceil(ry))
         area = w * h
-        for j in range(max(0, cj - reach), min(gh, cj + reach + 1)):
+        for j in range(max(0, cj - reach_y), min(gh, cj + reach_y + 1)):
             ccy = (j + 0.5) * stride
-            for i in range(max(0, ci - reach), min(gw, ci + reach + 1)):
+            dy = (ccy - cy) / (ry * stride)
+            for i in range(max(0, ci - reach_x), min(gw, ci + reach_x + 1)):
                 ccx = (i + 0.5) * stride
+                dx = (ccx - cx) / (rx * stride)
                 is_center = (i == ci and j == cj)
                 inside = (x1 <= ccx <= x2) and (y1 <= ccy <= y2)
-                near = abs(ccx - cx) <= r * stride and abs(ccy - cy) <= r * stride
+                near = (dx * dx + dy * dy) <= 1.0
                 if is_center or (inside and near):
                     if area < best_area[j, i]:
                         best_area[j, i] = area
@@ -376,7 +382,7 @@ def bbox_ciou(b1, b2, eps=1e-7):
     return iou - rho2 / c2 - alpha * v, iou
 
 
-def det_loss(cls_logit, box_raw, cls_idx, box_t, lam=1.0, w_cls=1.0, w_box=3.0, qfl_beta=2.0, stride=STRIDE, max_dist=20.0):
+def det_loss(cls_logit, box_raw, cls_idx, box_t, lam=1.0, w_cls=1.0, w_box=4.5, qfl_beta=2.0, stride=STRIDE, max_dist=20.0):
     cls_logit, box_raw = cls_logit.float(), box_raw.float()
     pos = cls_idx >= 0
     n_pos = pos.sum().clamp(min=1).float()
@@ -423,7 +429,7 @@ def nms_np(boxes, scores, thr, max_keep):
     return np.asarray(keep, dtype=np.int64)
 
 
-def decode_batch_np(cls_logit, box_raw, score_thr=0.001, nms_iou=0.60, pre_nms=1000, max_det=100,
+def decode_batch_np(cls_logit, box_raw, score_thr=0.001, nms_iou=0.55, pre_nms=1000, max_det=100,
                     stride=STRIDE, max_dist=20.0, orig_w=ORIG_W, orig_h=ORIG_H):
     B, C, gh, gw = cls_logit.shape
     scores = _sigmoid(cls_logit)
@@ -726,6 +732,7 @@ def main():
     start_time = time.time()
 
     for epoch in range(args.epochs):
+        t0 = time.time()
         model.train()
         train_ds.set_epoch(epoch)
         if epoch >= close_mosaic_epoch:
@@ -769,44 +776,55 @@ def main():
         tr_box = loss_box_accum / steps_per_epoch
         tr_total = total_loss_accum / steps_per_epoch
 
-        # Evaluate validation mAP50 every 5 epochs or every epoch in the last 20
-        eval_now = ((epoch + 1) % 5 == 0) or (epoch + 1 >= close_mosaic_epoch) or (epoch + 1 == args.epochs)
-        if eval_now:
-            ema.ema.eval()
-            dets_val = []
-            with torch.no_grad():
-                for imgs, _, _, _ in val_loader:
-                    x = imgs.to(device, non_blocking=True).float().div_(255.0)
-                    if device.type == "cuda":
-                        x = x.contiguous(memory_format=torch.channels_last)
-                    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
-                        co, bo = ema.ema(x)
-                    outs = decode_batch_np(co.float().cpu().numpy(), bo.float().cpu().numpy(), score_thr=0.001)
-                    dets_val.extend(outs)
+        # Evaluate validation loss and mAP50 every epoch
+        ema.ema.eval()
+        val_cls_accum, val_box_accum, val_loss_accum = 0.0, 0.0, 0.0
+        dets_val = []
+        with torch.no_grad():
+            for imgs, cls_idx, box_t, _ in val_loader:
+                x = imgs.to(device, non_blocking=True).float().div_(255.0)
+                if device.type == "cuda":
+                    x = x.contiguous(memory_format=torch.channels_last)
+                cls_idx = cls_idx.to(device, non_blocking=True)
+                box_t = box_t.to(device, non_blocking=True)
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
+                    co, bo = ema.ema(x)
+                    vl, v_cls, v_box = det_loss(co, bo, cls_idx, box_t, lam=lam)
+                val_cls_accum += v_cls.item()
+                val_box_accum += v_box.item()
+                val_loss_accum += vl.item()
+                outs = decode_batch_np(co.float().cpu().numpy(), bo.float().cpu().numpy(), score_thr=0.001)
+                dets_val.extend(outs)
 
-            val_map50, per_class = evaluate_map(dets_val, vl_lbls)
-            is_best = val_map50 > best_map50
-            if is_best:
-                best_map50 = val_map50
-                best_epoch = epoch + 1
-                torch.save({
-                    "epoch": epoch + 1,
-                    "ema": ema.ema.state_dict(),
-                    "spec": spec,
-                    "map50": val_map50,
-                    "per_class_ap": per_class,
-                }, best_pt_path)
+        val_cls = val_cls_accum / len(val_loader)
+        val_box = val_box_accum / len(val_loader)
+        val_loss = val_loss_accum / len(val_loader)
+        val_map50, per_class = evaluate_map(dets_val, vl_lbls)
 
-            tag = "★ NEW BEST!" if is_best else ""
-            print(f"--> Ep {epoch+1:03d}/{args.epochs:03d} | Train: {tr_total:.4f} (cls {tr_cls:.4f}, box {tr_box:.4f}) | Val mAP50: {val_map50*100:.2f}% (Best: {best_map50*100:.2f}% @ Ep {best_epoch}) {tag}", flush=True)
-            if is_best:
-                ap_strs = [f"{CLASS_NAMES[c]}: {per_class.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)]
-                print(f"    Per-class: {' | '.join(ap_strs)}", flush=True)
-        else:
-            print(f"--> Ep {epoch+1:03d}/{args.epochs:03d} | Train: {tr_total:.4f} (cls {tr_cls:.4f}, box {tr_box:.4f}) | lr: {current_lr:.2e}", flush=True)
+        is_best = val_map50 > best_map50
+        if is_best:
+            best_map50 = val_map50
+            best_epoch = epoch + 1
+            torch.save({
+                "epoch": epoch + 1,
+                "ema": ema.ema.state_dict(),
+                "spec": spec,
+                "map50": val_map50,
+                "per_class_ap": per_class,
+            }, best_pt_path)
+
+        dt = time.time() - t0
+        ms_per_step = (dt / steps_per_epoch) * 1000.0
+        print(f"Epoch {epoch+1}/{args.epochs}", flush=True)
+        print(f"{steps_per_epoch}/{steps_per_epoch} ━━━━━━━━━━━━━━━━━━━━ {int(dt)}s {int(ms_per_step)}ms/step - loss: {tr_total:.4f} - cls_loss: {tr_cls:.4f} - box_loss: {tr_box:.4f} - val_loss: {val_loss:.4f} - val_cls_loss: {val_cls:.4f} - val_box_loss: {val_box:.4f} - val_mAP50: {val_map50*100:.2f}% - lr: {current_lr:.4e}", flush=True)
+        if is_best:
+            print(f"[★ NEW BEST] Val mAP50: {val_map50*100:.2f}% (Epoch {best_epoch})", flush=True)
+            ap_strs = [f"{CLASS_NAMES[c]}: {per_class.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)]
+            print(f"    Per-class: {' | '.join(ap_strs)}", flush=True)
 
     elapsed = time.time() - start_time
-    print(f"\n[✔] Training completed in {elapsed/60:.1f} minutes! Best Val mAP50: {best_map50*100:.2f}% at Epoch {best_epoch}\n")
+    print(f"\nRestoring model weights from the end of the best epoch: {best_epoch}.", flush=True)
+    print(f"[✔] Best val_mAP50: {best_map50*100:.2f}% (completed in {elapsed/60:.1f} minutes)\n", flush=True)
 
     # 6. Load Best Weights & Synthesize Keras + INT8 Model
     print("[*] Synthesizing matching Keras model and performing Full INT8 PTQ...")
@@ -949,19 +967,18 @@ def main():
                 project_root / "qualifiers/submissions/intent_preds.csv",
                 project_root / "submission.csv"
             ]
-            intent_df = None
+            intent_rows = []
             for cand in intent_candidates:
                 if cand.exists():
-                    df = pd.read_csv(cand)
-                    if "task_type" in df.columns:
-                        df = df[df["task_type"] == "INTENT"]
-                    if len(df) >= 4000:
-                        intent_df = df
+                    with open(cand, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        rows = [r for r in reader if r.get("task_type") == "INTENT"]
+                    if len(rows) >= 4000:
+                        intent_rows = rows
                         break
 
-            if intent_df is not None:
-                for _, r in intent_df.iterrows():
-                    sub_rows.append(("INTENT", str(r["sample_id"]), str(r["prediction"])))
+            for r in intent_rows:
+                sub_rows.append(("INTENT", str(r["sample_id"]), str(r["prediction"])))
 
             out_sub_path = output_dir / "submission.csv"
             with open(out_sub_path, "w", newline="", encoding="utf-8") as f:
