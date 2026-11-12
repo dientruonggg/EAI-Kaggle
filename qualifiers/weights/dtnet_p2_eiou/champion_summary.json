@@ -1,0 +1,25 @@
+{
+  "model_name": "DTNet-P2 EIoU & Gated Hard-Negative Champion",
+  "epochs_trained": 296,
+  "val_map50_fp32": 0.9795558485878418,
+  "val_map50_int8": 0.9777907123439673,
+  "total_contest_score": 98.44534986407771,
+  "optimal_thresholds": {
+    "bottle": 0.001,
+    "cup": 0.01,
+    "phone": 0.005,
+    "book": 0.001,
+    "mouse": 0.005,
+    "box": 0.06,
+    "toy_car": 0.001
+  },
+  "per_class_ap50": {
+    "bottle": 0.9878381559211211,
+    "cup": 0.9801805198013985,
+    "phone": 0.9742697346224023,
+    "book": 0.9628537970718247,
+    "mouse": 0.9685510411707976,
+    "box": 0.9967700643959844,
+    "toy_car": 0.9740716734242416
+  }
+}

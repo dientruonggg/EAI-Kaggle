@@ -144,10 +144,15 @@ def evaluate_map(dets, gts, num_classes=NUM_CLASSES, iou_thr=0.5):
 
 
 def main():
-    tflite_path = PROJECT_ROOT / "qualifiers/weights/dtnet_p2_champion/dtnet_p2_int8.tflite"
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tflite", default=str(PROJECT_ROOT / "qualifiers/weights/dtnet_p2_champion/dtnet_p2_int8.tflite"))
+    args = parser.parse_args()
+
+    tflite_path = Path(args.tflite)
     val_imgs = sorted(glob.glob(str(PROJECT_ROOT / "qualifiers/data/val/images/*.png")) +
                       glob.glob(str(PROJECT_ROOT / "qualifiers/data/val/images/*.jpg")))
-    print(f"[*] Analyzing DTNet-P2 errors across {len(val_imgs)} validation images...")
+    print(f"[*] Analyzing DTNet-P2 errors across {len(val_imgs)} validation images for {tflite_path.name}...")
 
     val_lbls = []
     for p in val_imgs:
@@ -207,10 +212,13 @@ def main():
 
     # Error breakdown with optimal NMS IoU
     opt_dets = [decode_batch_np(c, b, score_thr=0.001, nms_iou=best_nms_iou)[0] for c, b in raw_preds]
-    cal_path = PROJECT_ROOT / "qualifiers/weights/dtnet_p2_champion/champion_summary.json"
-    with open(cal_path) as f:
-        meta = json.load(f)
-    opt_thresh = meta["evaluation_metrics"]["calibrated_thresholds"]
+    cal_path = tflite_path.parent / "champion_summary.json"
+    if cal_path.exists():
+        with open(cal_path) as f:
+            meta = json.load(f)
+        opt_thresh = meta.get("evaluation_metrics", {}).get("calibrated_thresholds", meta.get("optimal_thresholds", {}))
+    else:
+        opt_thresh = {c: 0.05 for c in CLASS_NAMES}
 
     filtered_dets = []
     for d in opt_dets:

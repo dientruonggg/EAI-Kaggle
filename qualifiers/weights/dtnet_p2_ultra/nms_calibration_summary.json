@@ -1,0 +1,25 @@
+{
+  "model": "DTNet-P2-Ultra",
+  "epoch": 349,
+  "best_nms_iou": 0.6,
+  "calibrated_val_map50": 0.9817540889276726,
+  "projected_contest_score": 98.72278622493708,
+  "calibrated_thresholds": {
+    "bottle": 0.001,
+    "cup": 0.001,
+    "phone": 0.001,
+    "book": 0.001,
+    "mouse": 0.001,
+    "box": 0.001,
+    "toy_car": 0.001
+  },
+  "per_class_ap50": {
+    "bottle": 0.9920414006679973,
+    "cup": 0.9863404389731636,
+    "phone": 0.9859091457737879,
+    "book": 0.9672685272822938,
+    "mouse": 0.9730846074209418,
+    "box": 0.9965376266770526,
+    "toy_car": 0.9710968756984701
+  }
+}

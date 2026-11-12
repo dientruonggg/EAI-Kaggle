@@ -1,0 +1,25 @@
+{
+  "model": "DTNet-P2-Ultra",
+  "int8_tflite_path": "/home/bim/Projects/EAI-2026/qualifiers/weights/dtnet_p2_ultra/dtnet_p2_ultra_int8.tflite",
+  "int8_size_kb": 274.2734375,
+  "best_nms_iou": 0.6,
+  "calibrated_thresholds": {
+    "bottle": 0.02,
+    "cup": 0.005,
+    "phone": 0.02,
+    "book": 0.003,
+    "mouse": 0.005,
+    "box": 0.04,
+    "toy_car": 0.01
+  },
+  "val_map50": 0.9803761731870263,
+  "per_class_ap50": {
+    "bottle": 0.9925826226187706,
+    "cup": 0.9842247919304179,
+    "phone": 0.9839209437764143,
+    "book": 0.9681359094194524,
+    "mouse": 0.9723879558597157,
+    "box": 0.9951979907672713,
+    "toy_car": 0.966182997937143
+  }
+}
