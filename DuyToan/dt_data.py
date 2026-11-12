@@ -18,7 +18,7 @@ def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.0, rad_scale=0.3):
     """Gan target tren luoi (gh, gw) cho cac box (N,5)=[cls,x1,y1,x2,y2] (pixel, he toa do input).
     - Moi vat the: o chua tam + cac o co TAM nam trong box va gan tam (center sampling ~3x3, vat to toi da 7x7).
     - o bi nhieu vat tranh nhau -> uu tien vat NHO HON (bao ve vat nho).
-    Tra ve cls_idx (gh,gw) int64 (-1 = nen) va box_t (4,gh,gw) float32 xyxy pixel.
+    Tra ve cls_idx (gh,gw) int64 (>=0 duong, -1 = nen that, -2 = trong vat the nhung khong duong) va box_t (4,gh,gw) float32 xyxy pixel.
     """
     cls_idx = np.full((gh, gw), -1, dtype=np.int64)
     box_t = np.zeros((4, gh, gw), dtype=np.float32)
@@ -45,15 +45,50 @@ def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.0, rad_scale=0.3):
                         best_area[j, i] = area
                         cls_idx[j, i] = int(c)
                         box_t[:, j, i] = (x1, y1, x2, y2)
+    # o co TAM nam trong box nhung khong phai o duong -> -2 ("trong vat the"): loss FP khong phat o nay
+    inside = np.zeros((gh, gw), dtype=bool)
+    for c, x1, y1, x2, y2 in boxes:
+        if x2 - x1 <= 1 or y2 - y1 <= 1:
+            continue
+        i0, i1 = max(0, int(math.ceil(x1 / stride - 0.5))), min(gw - 1, int(math.floor(x2 / stride - 0.5)))
+        j0, j1 = max(0, int(math.ceil(y1 / stride - 0.5))), min(gh - 1, int(math.floor(y2 / stride - 0.5)))
+        if i1 >= i0 and j1 >= j0:
+            inside[j0:j1 + 1, i0:i1 + 1] = True
+    cls_idx[(cls_idx == -1) & inside] = -2
     return cls_idx, box_t
 
 
-def _affine_boxes(boxes, s, tx, ty, W, H, min_vis=0.4, min_size=2.0):
+def _make_affine(rng, W, H, s, src_c, jitter, rot_deg, rot_p):
+    """Ma tran 2x3: scale s + xoay (+-rot_deg, xac suat rot_p) quanh tam nguon src_c, roi dua tam ve giua anh (+jitter)."""
+    ang = rng.uniform(-rot_deg, rot_deg) if (rot_deg > 0 and rng.random() < rot_p) else 0.0
+    a = math.radians(ang)
+    R = s * np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]], dtype=np.float64)
+    dst = np.array([W / 2 + jitter[0], H / 2 + jitter[1]])
+    M = np.zeros((2, 3), dtype=np.float64)
+    M[:, :2] = R
+    M[:, 2] = dst - R @ np.asarray(src_c, dtype=np.float64)
+    return M.astype(np.float32), a
+
+
+def _affine_boxes(boxes, M, ang, W, H, min_vis=0.4, min_size=2.0, rot_tight=0.5):
+    """Bien doi box theo M (scale/xoay/tinh tien). Khi xoay, box bao 4 goc bi PHONG TO (toi ~1.3x o 20 do)
+    -> tron `rot_tight` voi uoc luong 'vat hinh elip' (bottle/cup/mouse/toy_car tron hon hop bao) de box it bi phong."""
     if len(boxes) == 0:
         return boxes
     b = boxes.copy()
-    b[:, [1, 3]] = b[:, [1, 3]] * s + tx
-    b[:, [2, 4]] = b[:, [2, 4]] * s + ty
+    s = float(np.sqrt(abs(np.linalg.det(M[:, :2]))))
+    w0, h0 = (b[:, 3] - b[:, 1]), (b[:, 4] - b[:, 2])
+    c0 = np.stack([(b[:, 1] + b[:, 3]) / 2, (b[:, 2] + b[:, 4]) / 2], 1)
+    c1 = c0 @ M[:, :2].T + M[:, 2]
+    ca, sa = abs(math.cos(ang)), abs(math.sin(ang))
+    hw_rect = s * (w0 * ca + h0 * sa) / 2
+    hh_rect = s * (w0 * sa + h0 * ca) / 2
+    hw_ell = s * np.sqrt((w0 * ca / 2) ** 2 + (h0 * sa / 2) ** 2)
+    hh_ell = s * np.sqrt((w0 * sa / 2) ** 2 + (h0 * ca / 2) ** 2)
+    hw = (1 - rot_tight) * hw_rect + rot_tight * hw_ell
+    hh = (1 - rot_tight) * hh_rect + rot_tight * hh_ell
+    b[:, 1], b[:, 3] = c1[:, 0] - hw, c1[:, 0] + hw
+    b[:, 2], b[:, 4] = c1[:, 1] - hh, c1[:, 1] + hh
     area0 = (b[:, 3] - b[:, 1]) * (b[:, 4] - b[:, 2])
     b[:, [1, 3]] = b[:, [1, 3]].clip(0, W)
     b[:, [2, 4]] = b[:, [2, 4]].clip(0, H)
@@ -73,19 +108,34 @@ def _hsv_jitter(img, rng, gains):
     return cv2.cvtColor(out, cv2.COLOR_HSV2RGB)
 
 
+def _photo_extra(img, rng, p):
+    """Lech mau kenh RGB + mo nhe + nhieu: test co vat/mau/do net khac train -> khong de mo hinh dua vao mau/do net."""
+    if rng.random() >= p:
+        return img
+    out = img.astype(np.float32) * rng.uniform(0.9, 1.1, 3).astype(np.float32)
+    if rng.random() < 0.3:
+        k = int(rng.choice([3, 5]))
+        out = cv2.GaussianBlur(out, (k, k), 0)
+    if rng.random() < 0.3:
+        out += rng.normal(0.0, rng.uniform(1.0, 6.0), out.shape).astype(np.float32)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 class DetDataset(Dataset):
     """Tra ve (img uint8 [3,H,W], cls_idx [gh,gw], box_t [4,gh,gw], idx).
-    train=True: mosaic + scale/translate + HSV + lat ngang. train=False: chi resize (neu can)."""
+    train=True: mosaic + scale/translate/XOAY + HSV + lat ngang. train=False: chi resize (neu can)."""
 
     def __init__(self, img_dir, ids, labels, img_w, img_h, stride, train,
                  mosaic_p=0.5, scale=(0.75, 1.25), translate=0.1, flip_p=0.5,
-                 hsv=(0.015, 0.5, 0.35), orig_w=320, orig_h=240, seed=0):
+                 hsv=(0.015, 0.5, 0.35), orig_w=320, orig_h=240, seed=0, rotate=0.0, rotate_p=0.5, rot_tight=0.5, photo_p=0.0):
         self.img_dir = Path(img_dir)
         self.ids, self.labels = list(ids), list(labels)
         self.W, self.H, self.stride = int(img_w), int(img_h), int(stride)
         self.gw, self.gh = self.W // self.stride, self.H // self.stride
         self.train = train
         self.scale, self.translate, self.flip_p, self.hsv = scale, translate, flip_p, hsv
+        self.rotate, self.rot_tight, self.photo_p = float(rotate), float(rot_tight), float(photo_p)
+        self.rotate_p = mp.Value("d", float(rotate_p))      # dung chung workers: tat xoay o cac epoch cuoi
         self.orig_w, self.orig_h, self.seed = orig_w, orig_h, seed
         self.epoch = mp.Value("i", 0)             # dung chung voi workers (persistent_workers)
         self.mosaic_p = mp.Value("d", float(mosaic_p))
@@ -95,6 +145,9 @@ class DetDataset(Dataset):
 
     def set_mosaic(self, p):
         self.mosaic_p.value = float(p)
+
+    def set_rotate(self, p):
+        self.rotate_p.value = float(p)
 
     def __len__(self):
         return len(self.ids)
@@ -116,11 +169,10 @@ class DetDataset(Dataset):
         W, H = self.W, self.H
         img, b = self._load(k)
         s = rng.uniform(*self.scale)
-        tx = W / 2 - s * W / 2 + rng.uniform(-self.translate, self.translate) * W
-        ty = H / 2 - s * H / 2 + rng.uniform(-self.translate, self.translate) * H
-        M = np.array([[s, 0, tx], [0, s, ty]], dtype=np.float32)
+        jit = (rng.uniform(-self.translate, self.translate) * W, rng.uniform(-self.translate, self.translate) * H)
+        M, ang = _make_affine(rng, W, H, s, (W / 2, H / 2), jit, self.rotate, self.rotate_p.value)
         img = cv2.warpAffine(img, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=(114, 114, 114))
-        return img, _affine_boxes(b, s, tx, ty, W, H)
+        return img, _affine_boxes(b, M, ang, W, H, rot_tight=self.rot_tight)
 
     def _mosaic(self, k, rng):
         W, H = self.W, self.H
@@ -158,11 +210,10 @@ class DetDataset(Dataset):
                 all_b.append(b[ok])
         b = np.concatenate(all_b, 0) if all_b else np.zeros((0, 5), np.float32)
         s = rng.uniform(*self.scale)
-        tx = W / 2 - s * W + rng.uniform(-self.translate, self.translate) * W
-        ty = H / 2 - s * H + rng.uniform(-self.translate, self.translate) * H
-        M = np.array([[s, 0, tx], [0, s, ty]], dtype=np.float32)
+        jit = (rng.uniform(-self.translate, self.translate) * W, rng.uniform(-self.translate, self.translate) * H)
+        M, ang = _make_affine(rng, W, H, s, (W, H), jit, self.rotate, self.rotate_p.value)
         img = cv2.warpAffine(canvas, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=(114, 114, 114))
-        return img, _affine_boxes(b, s, tx, ty, W, H)
+        return img, _affine_boxes(b, M, ang, W, H, rot_tight=self.rot_tight)
 
     # -------------------------------------------------------------------- #
     def __getitem__(self, k):
@@ -173,6 +224,7 @@ class DetDataset(Dataset):
             else:
                 img, b = self._single(k, rng)
             img = _hsv_jitter(img, rng, self.hsv)
+            img = _photo_extra(img, rng, self.photo_p)
             if rng.random() < self.flip_p:
                 img = img[:, ::-1]
                 if len(b):
