@@ -30,7 +30,7 @@ np.random.seed(42)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import tensorflow as tf
 tf.random.set_seed(42)
-from tensorflow.keras import layers, models
+from tensorflow.keras import layers, models, regularizers, callbacks
 
 # 5 Competition Intent Classes (Fixed Order)
 INTENT_CLASSES = ["COUNT", "EXIST", "LIST", "LOCATION", "OUT_OF_SCOPE"]
@@ -90,19 +90,23 @@ def build_pure_ascii_textcnn(
     embed_dim: int = 32,
     num_filters: int = 24,
     filter_sizes: tuple = (3, 5, 7, 9),
-    num_classes: int = 5
+    num_classes: int = 5,
+    l2_reg: float = 1e-4,
+    spatial_dropout: float = 0.15,
+    dense_dropout: float = 0.35
 ) -> models.Model:
     """
-    Pure Char/Byte-Level TextCNN Architecture:
+    Pure Char/Byte-Level TextCNN Architecture with Anti-Overfitting Enhancements:
     - Input: [batch_size, max_len] ASCII integer values
     - Embedding: 128 -> embed_dim (32)
-    - Conv1D banks:
+    - SpatialDropout1D: drops entire character channel maps across sequence
+    - Conv1D banks (with L2 Regularization):
         * k=3: captures 3-char stems ("dem", "coc", "hop", "xe ")
         * k=5: captures core root words ("chai ", "sach ", "o dau")
         * k=7: captures key phrases ("co phai", "bao nhieu", "vi tri ")
         * k=9: captures long intent structures ("co bao nhieu", "nam o dau vay")
     - GlobalMaxPooling1D: captures most salient signals across sequence
-    - Dense + Softmax: outputs exact class probability distribution
+    - Dense + Dropout + Softmax: outputs exact class probability distribution
     """
     inputs = layers.Input(shape=(max_len,), dtype="int32", name="ascii_input_ids")
     emb = layers.Embedding(
@@ -111,6 +115,11 @@ def build_pure_ascii_textcnn(
         name="ascii_embedding"
     )(inputs)
 
+    # SpatialDropout1D prevents co-adaptation of character feature channels
+    x = layers.SpatialDropout1D(spatial_dropout, name="char_spatial_dropout")(emb)
+
+    reg = regularizers.l2(l2_reg) if l2_reg > 0 else None
+
     pooled_branches = []
     for k in filter_sizes:
         conv = layers.Conv1D(
@@ -118,14 +127,15 @@ def build_pure_ascii_textcnn(
             kernel_size=k,
             padding="same",
             activation="relu",
+            kernel_regularizer=reg,
             name=f"char_conv_k{k}"
-        )(emb)
+        )(x)
         pool = layers.GlobalMaxPooling1D(name=f"char_gpool_k{k}")(conv)
         pooled_branches.append(pool)
 
     concat = layers.Concatenate(name="feature_concat")(pooled_branches)
-    dense = layers.Dense(64, activation="relu", name="dense_latent")(concat)
-    drop = layers.Dropout(0.2, name="dropout")(dense)
+    dense = layers.Dense(64, activation="relu", kernel_regularizer=reg, name="dense_latent")(concat)
+    drop = layers.Dropout(dense_dropout, name="dropout")(dense)
     outputs = layers.Dense(num_classes, activation="softmax", name="intent_probs")(drop)
 
     model = models.Model(inputs=inputs, outputs=outputs, name="Pure_ASCII_Char_TextCNN")
@@ -164,14 +174,18 @@ def train_and_export(
     val_csv: str = None,
     test_csv: str = None,
     output_dir: str = "weights_pure_ascii",
-    epochs: int = 25,
+    epochs: int = 30,
     batch_size: int = 32,
-    lr: float = 2e-3
+    lr: float = 2e-3,
+    l2_reg: float = 1e-4,
+    label_smoothing: float = 0.1,
+    patience: int = 6
 ):
     os.makedirs(output_dir, exist_ok=True)
     print("=" * 80)
-    print("   TRAINING PURE CHAR/BYTE-LEVEL TextCNN (ZERO VOCAB LEAKAGE)")
+    print("   TRAINING PURE CHAR/BYTE-LEVEL TextCNN (ANTI-OVERFIT ENHANCED)")
     print("   Input Encoding : Fixed 128 ASCII Bytes (Zero vocab.json)")
+    print(f"   Regularization : L2 Reg={l2_reg}, Label Smoothing={label_smoothing}")
     print("   Rule Overrides : NONE (100% Pure Neural Network Argmax)")
     print("   Target Ops     : Full Integer INT8 TFLite Micro for ESP32-S3")
     print("=" * 80)
@@ -181,10 +195,9 @@ def train_and_export(
     train_ids, train_texts, y_train_raw = load_dataset(train_csv, is_test=False)
     X_train = np.stack([encode_query_to_ascii_ids(t) for t in train_texts])
     y_train = tf.keras.utils.to_categorical(y_train_raw, num_classes=5)
-    print(f"[✔] Training samples: {len(X_train):,} queries | Input shape: {X_train.shape}")
+    print(f"[✔] Total raw training samples: {len(X_train):,} queries | Input shape: {X_train.shape}")
 
-    # 2. Load Validation Data (if provided)
-    val_data = None
+    # 2. Validation Data Setup (Auto-split if not provided)
     if val_csv and os.path.exists(val_csv):
         print(f"[*] Loading validation data from: {val_csv}")
         _, val_texts, y_val_raw = load_dataset(val_csv, is_test=False)
@@ -192,42 +205,87 @@ def train_and_export(
         y_val = tf.keras.utils.to_categorical(y_val_raw, num_classes=5)
         val_data = (X_val, y_val)
         print(f"[✔] Validation samples: {len(X_val):,} queries")
+    else:
+        # Automatic stratified 15% split from training data to monitor generalization & stop overfitting
+        print("[*] No validation CSV provided. Creating automatic 15% stratified validation split...")
+        indices_by_class = {c: [] for c in range(5)}
+        for idx, lbl in enumerate(y_train_raw):
+            indices_by_class[lbl].append(idx)
+
+        train_idx, val_idx = [], []
+        val_ratio = 0.15
+        for c, idxs in indices_by_class.items():
+            np.random.shuffle(idxs)
+            split_point = int(len(idxs) * (1 - val_ratio))
+            train_idx.extend(idxs[:split_point])
+            val_idx.extend(idxs[split_point:])
+
+        np.random.shuffle(train_idx)
+        np.random.shuffle(val_idx)
+
+        X_train_full, y_train_full = X_train, y_train
+        X_train, y_train = X_train_full[train_idx], y_train_full[train_idx]
+        X_val, y_val = X_train_full[val_idx], y_train_full[val_idx]
+        y_val_raw = y_train_raw[val_idx]
+        val_data = (X_val, y_val)
+        print(f"[✔] Auto-Split: {len(X_train):,} Train samples | {len(X_val):,} Validation samples")
 
     # 3. Instantiate Architecture & Check Parameters
-    model = build_pure_ascii_textcnn()
+    model = build_pure_ascii_textcnn(l2_reg=l2_reg)
     param_count = model.count_params()
     print(f"\n[*] Model Parameters: {param_count:,} (Hardware budget: < 200,000)")
     assert param_count < 200000, f"Exceeded hardware budget! {param_count} >= 200,000"
 
+    # Loss function with Label Smoothing to prevent overconfident/skewed predictions
+    loss_fn = tf.keras.losses.CategoricalCrossentropy(label_smoothing=label_smoothing)
+
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=lr),
-        loss="categorical_crossentropy",
+        loss=loss_fn,
         metrics=["accuracy"]
     )
 
-    # 4. Train Model
-    print(f"\n[*] Starting training for {epochs} epochs...")
+    # 4. Training Callbacks: EarlyStopping + Learning Rate Decay
+    cb_list = [
+        callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=patience,
+            restore_best_weights=True,
+            verbose=1
+        ),
+        callbacks.ReduceLROnPlateau(
+            monitor="val_loss",
+            factor=0.5,
+            patience=max(2, patience // 2),
+            min_lr=1e-5,
+            verbose=1
+        )
+    ]
+
+    # 5. Train Model
+    print(f"\n[*] Starting training for up to {epochs} epochs (EarlyStopping patience={patience})...")
     model.fit(
         X_train, y_train,
         validation_data=val_data,
         epochs=epochs,
         batch_size=batch_size,
+        callbacks=cb_list,
         verbose=1
     )
 
-    # 5. Evaluate Floating-Point Model
+    # 6. Evaluate Floating-Point Model
     tr_loss, tr_acc = model.evaluate(X_train, y_train, verbose=0)
-    print(f"\n[✔] Train Accuracy: {tr_acc * 100:.2f}%")
+    print(f"\n[✔] Final Train Accuracy: {tr_acc * 100:.2f}% | Train Loss: {tr_loss:.4f}")
     if val_data:
         vl_loss, vl_acc = model.evaluate(val_data[0], val_data[1], verbose=0)
-        print(f"[✔] Val Accuracy  : {vl_acc * 100:.2f}%")
+        print(f"[✔] Best Val Accuracy  : {vl_acc * 100:.2f}% | Val Loss  : {vl_loss:.4f}")
 
     # Save Keras Model
     keras_path = os.path.join(output_dir, "char_text_cnn.keras")
     model.save(keras_path)
     print(f"[✔] Saved Keras model: {keras_path}")
 
-    # 6. Quantize to Full INT8 TFLite Micro
+    # 7. Quantize to Full INT8 TFLite Micro
     print("\n[*] Quantizing to Full INT8 TFLite Micro for ESP32-S3...")
     def representative_dataset_gen():
         # Representative calibration samples from real training set
@@ -320,9 +378,12 @@ if __name__ == "__main__":
     parser.add_argument("--val_csv", default=None, help="Path to validation CSV (optional)")
     parser.add_argument("--test_csv", default=None, help="Path to test CSV (optional, columns: question_id, question)")
     parser.add_argument("--output_dir", default="qualifiers/weights_pure_ascii", help="Directory to save weights & CSV")
-    parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=30, help="Max number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=2e-3, help="Learning rate")
+    parser.add_argument("--l2_reg", type=float, default=1e-4, help="L2 regularization weight penalty")
+    parser.add_argument("--label_smoothing", type=float, default=0.1, help="Label smoothing factor for CrossEntropy")
+    parser.add_argument("--patience", type=int, default=6, help="Early stopping patience")
     args = parser.parse_args()
 
     train_and_export(
@@ -332,5 +393,8 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         epochs=args.epochs,
         batch_size=args.batch_size,
-        lr=args.lr
+        lr=args.lr,
+        l2_reg=args.l2_reg,
+        label_smoothing=args.label_smoothing,
+        patience=args.patience
     )
