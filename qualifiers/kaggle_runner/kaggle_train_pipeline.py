@@ -964,8 +964,8 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
         avg_cls = running_cls / max(1, steps)
         avg_box = running_box / max(1, steps)
 
-        # Evaluate periodically (every 10 epochs or last 10 epochs)
-        if epoch % 10 == 0 or epoch >= (stage1_epochs - 10):
+        # Evaluate periodically (Epoch 1, every 5 epochs, and last 10 epochs)
+        if epoch == 1 or epoch % 5 == 0 or epoch >= (stage1_epochs - 10):
             ema.ema.eval()
             val_dets = []
             with torch.no_grad():
@@ -994,8 +994,9 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
             else:
                 best_mark = f"(Best: {best_map50_s1*100:.2f}%)"
 
-            print(f"[Stage 1] Epoch {epoch:03d}/{stage1_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} | lr: {cur_lr:.2e}")
-        elif epoch % 5 == 0:
+            ap_str = " ".join([f"{CLASS_NAMES[c][:3]}:{aps.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)])
+            print(f"[Stage 1] Epoch {epoch:03d}/{stage1_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} [{ap_str}] | lr: {cur_lr:.2e}")
+        else:
             print(f"[Stage 1] Epoch {epoch:03d}/{stage1_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | lr: {cur_lr:.2e}")
 
     print(f"\n[✔] Stage 1 QFL+CIoU Completed! Peak Baseline mAP50: {best_map50_s1*100:.2f}%")
@@ -1095,8 +1096,8 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
         avg_cls = running_cls / max(1, steps)
         avg_box = running_box / max(1, steps)
 
-        # Evaluate periodically
-        if epoch % 5 == 0 or epoch >= (stage2_epochs - 30):
+        # Evaluate periodically (Epoch 1, every 5 epochs, and last 30 epochs)
+        if epoch == 1 or epoch % 5 == 0 or epoch >= (stage2_epochs - 30):
             ema.ema.eval()
             val_dets = []
             with torch.no_grad():
@@ -1125,7 +1126,8 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
             else:
                 best_mark = f"(Best: {best_map50_s2*100:.2f}%)"
 
-            print(f"[Stage 2] Epoch {epoch:03d}/{stage2_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} | lr: {cur_lr:.2e}")
+            ap_str = " ".join([f"{CLASS_NAMES[c][:3]}:{aps.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)])
+            print(f"[Stage 2] Epoch {epoch:03d}/{stage2_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} [{ap_str}] | lr: {cur_lr:.2e}")
         else:
             print(f"[Stage 2] Epoch {epoch:03d}/{stage2_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | lr: {cur_lr:.2e}")
 
