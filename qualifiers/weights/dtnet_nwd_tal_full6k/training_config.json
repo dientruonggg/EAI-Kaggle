@@ -1,0 +1,15 @@
+{
+  "epochs": 200,
+  "batch_size": 64,
+  "lr": 0.00012,
+  "min_lr": 2e-06,
+  "w_box": 5.5,
+  "w_nwd": 2.0,
+  "w_neg": 1.5,
+  "w_mutual": 3.0,
+  "close_mosaic": 50,
+  "init_weights": "qualifiers/weights/dtnet_nwd_tal_full6k/latest_dtnet_nwd_tal_full6k.pt",
+  "data_dir": "qualifiers/data",
+  "output_dir": "qualifiers/weights/dtnet_nwd_tal_full6k",
+  "num_workers": 4
+}

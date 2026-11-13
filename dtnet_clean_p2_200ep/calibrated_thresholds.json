@@ -1,0 +1,23 @@
+{
+  "best_mAP50": 0.984601365998884,
+  "optimal_nms_iou": 0.65,
+  "optimal_score_thr": 0.001,
+  "per_class_ap50": {
+    "bottle": 0.9901737373988942,
+    "cup": 0.98565227439557,
+    "phone": 0.9882189159061705,
+    "book": 0.9769957852796938,
+    "mouse": 0.9769127895906146,
+    "box": 0.9963502783823075,
+    "toy_car": 0.9779057810389371
+  },
+  "tflite_path": "qualifiers/weights/dtnet_clean_p2_200ep/dtnet_clean_200ep_int8.tflite",
+  "quantization_info": {
+    "input_scale": 0.003921568859368563,
+    "input_zp": -128,
+    "cls_scale": 0.1152990311384201,
+    "cls_zp": 96,
+    "box_scale": 0.029835451394319534,
+    "box_zp": 74
+  }
+}

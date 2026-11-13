@@ -12,7 +12,7 @@ Target 99.5% mAP@50 Architecture:
      - max_r = 5.5 (full supervisory coverage for large objects book & box)
      - rad_scale = 0.32
   3. Efficient IoU (EIoU) Box Regression + IoU-Gated Hard-Negative QFL (w_neg = 1.5, gate = 0.48)
-  4. Train 100% from Scratch (Seed 42, Kaiming Normal) with Early Stopping (patience=35, epochs=400)
+  4. Train 100% from Scratch (Seed 42, Kaiming Normal) for Full 400 Epochs (Patience=0, No Early Stopping)
   5. Memory-safe DataLoader (num_workers=2, avoids OOM/systemd-oomd)
 =============================================================================
 """
@@ -663,7 +663,7 @@ def main():
     default_out = Path(__file__).resolve().parents[1] / "qualifiers/weights/dtnet_p2_ultra"
     parser = argparse.ArgumentParser(description="Train DTNet-P2-Ultra Champion Pipeline (197k Params)")
     parser.add_argument("--epochs", type=int, default=400, help="Total training epochs (default: 400)")
-    parser.add_argument("--patience", type=int, default=35, help="Early stopping patience (default: 35, 0 to disable)")
+    parser.add_argument("--patience", type=int, default=0, help="Early stopping patience (default: 0 to disable, or >0 for early stop)")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size (default: 64)")
     parser.add_argument("--lr", type=float, default=2e-3, help="Base LR for batch 32")
     parser.add_argument("--w_box", type=float, default=5.5, help="Base EIoU box loss weight (default: 5.5)")
@@ -804,7 +804,8 @@ def main():
         best_epoch = ck.get("epoch", 0)
         print(f"[✔] Resumed state: Start Epoch {start_epoch}, Baseline Best mAP50: {best_map50*100:.2f}% (Epoch {best_epoch})")
 
-    print(f"\n[*] Starting Training: Epochs {start_epoch}->{args.epochs} on {device} (Close-mosaic at Ep {close_mosaic_epoch}, Patience {args.patience})...\n")
+    patience_str = "Disabled (full 400 epochs)" if args.patience <= 0 else f"{args.patience} epochs"
+    print(f"\n[*] Starting Training: Epochs {start_epoch}->{args.epochs} on {device} (Close-mosaic at Ep {close_mosaic_epoch}, Patience: {patience_str})...\n")
     start_time = time.time()
 
     for epoch in range(start_epoch, args.epochs):
@@ -901,6 +902,14 @@ def main():
             }, best_pt_path)
         else:
             patience_counter += 1
+
+        torch.save({
+            "epoch": epoch + 1,
+            "ema": ema.ema.state_dict(),
+            "spec": spec,
+            "map50": val_map50,
+            "per_class_ap": per_class,
+        }, output_dir / "latest_p2_ultra.pt")
 
         dt = time.time() - t0
         ms_per_step = (dt / steps_per_epoch) * 1000.0

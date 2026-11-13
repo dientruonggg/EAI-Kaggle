@@ -1,0 +1,731 @@
+                TIMELINE EDGE AI 2026
+                  Mở vòng
+                               Kickoff -      Thi đấu       Công bố đội
+ Mở đơn          Warm-up,
+                                                           thi vào Chung    Chung Kết
+ đăng ký        kiểm thử hệ    Training 1    vòng loại
+                                                           kết + Phát Kit
+               thống thi đấu
+
+
+
+
+24/10/2026 -   01/11/2026 -    8/11/2026    09/11/2026 -    20/11/2026      29/11/2026
+29/10/2026     07/11/2026                   18/11/2026
+                         TRƯỜNG ĐẠI HỌC BÁCH KHOA – ĐẠI HỌC ĐÀ NẴNG
+                              KHOA ĐIỆN TỬ VÀ TRÍ TUỆ NHÂN TẠO
+
+
+
+
+                            EDGE AI CHALLENGE 2026 LẦN 2
+                                           TRAINING 1
+
+                         Object Detection & Intent TextCNN trên ESP32-S3
+
+
+
+
+                                        PIONEER – Tháng 11/2026
+
+EDGE AI CHALLENGE 2026                                                     1/14
+    EDGE AI LÀ GÌ?
+
+
+                               AI xử lý dữ liệu ngay trên thiết bị — không cần gửi lên cloud.
+
+
+
+
+                       INPUT                              PROCESS                            OUTPUT
+                     THU NHẬN                             EDGE AI                           PHẢN HỒI
+                  Camera · Cảm biến                    ESP32-S3 · Model                    Kết quả xử lý
+
+
+
+
+                         TỐC ĐỘ PHẢN HỒI NHANH   /   ÍT PHỤ THUỘC CLOUD   /   TỐI ƯU CHO THIẾT BỊ NHÚNG
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                     2/14
+    Bài toán của cuộc thi
+
+
+
+
+                                         Object Detection
+         Ảnh từ camera
+                                      Class + Bounding Box
+
+
+                                                                                       Logic xử lý
+                                                                                                                  Trả lời
+                                                                                       Đếm / vị trí
+
+
+                                          Intent TextCNN
+       Câu hỏi tiếng Việt
+                                            5 loại intent
+
+
+
+
+                            Vòng loại: chấm hai mô hình trên Kaggle. Chung kết: chạy cả hệ thống trên ESP32-S3.
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                                      3/14
+      RÀNG BUỘC KỸ THUẬT
+
+
+          Parameters detection: Tối đa 200.000 tham số
+
+          Quantization (Model INT8): Tối đa 1,5 MB
+
+          Input image: Tối đa 320 × 240
+
+          Inference detection: Không ensemble / TTA
+
+          Latency: Chung kết ≤ 10 giây
+
+          Pretrained: Được dùng, phải khai báo
+
+
+
+
+EDGE AI CHALLENGE 2026                                   4/14
+     Dataset ảnh – 7 lớp vật thể
+
+
+
+
+EDGE AI CHALLENGE 2026             5/14
+    Dataset câu hỏi – 5 intent
+
+
+                          “Có bao nhiêu chai?”       COUNT
+
+
+
+                         “Có điện thoại không?”      EXIST
+
+
+
+                           “Trong ảnh có gì?”         LIST
+
+
+
+                          “Cuốn sách ở đâu?”        LOCATION
+
+
+
+                         “Hôm nay trời có mưa?”   OUT_OF_SCOPE
+
+
+
+
+EDGE AI CHALLENGE 2026                                           6/14
+    Dataset & Preprocessing
+
+
+                              Ảnh (Detection)             Văn bản (TextCNN)
+
+                                Ảnh 112 × 112                 Câu hỏi tiếng Việt
+
+
+
+                              Resize + Normalize             Chuẩn hóa văn bản
+
+
+
+                         Augmentation (lật, sáng, xoay)   Tokenization + Vocabulary
+
+
+
+                         Ảnh + bounding box sau xử lý      Padding + dãy token ID
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                7/14
+   CNN BACKBONE | TRÍCH XUẤT ĐẶC TRƯNG
+
+
+
+
+     Ảnh đầu vào               TẦNG NÔNG            TẦNG GIỮA           TẦNG SÂU                  FEATURE MAPS
+                                Cạnh · Góc           Hình dạng           Ngữ nghĩa                Đa mức, đa tỷ lệ
+         112 × 112
+
+                               Conv2D + ReLU        Stride / Pool        Conv Blocks
+
+
+
+
+                         Các tầng sâu có ngữ nghĩa mạnh hơn; tầng nông giữ chi tiết không gian.
+
+
+
+EDGE AI CHALLENGE 2026                                                                        OBJECT DETECTION / BACKBONE
+   DETECTION HEAD | CLASS + BOUNDING BOX
+
+
+                                                 Class
+                                                                                    phone 0.93           book 0.88
+                                                 phone / book / bottle
+
+
+
+
+                          DETECTION
+                                                 Confidence
+                             HEAD                0.93 / 0.88
+
+    Feature Maps
+    Từ Backbone / Neck
+                                                 BBox
+                                                 (x, y, w, h)
+                                                                                    Ảnh nguồn + bbox minh họa
+
+
+
+
+                         Head dự đoán lớp và tọa độ cho nhiều vị trí trên feature map.
+
+
+EDGE AI CHALLENGE 2026                                                                           OBJECT DETECTION / HEAD
+   OBJECT DETECTION | PIPELINE HOÀN CHỈNH
+
+
+
+
+                                                                                                                             phone 0.93
+                                                                            CLASS
+
+
+                                                                             BOX
+
+
+
+
+     INPUT               BACKBONE              NECK / FPN                  HEAD                 SCORE + NMS                  OUTPUT
+
+       Ảnh                Đặc trưng               Đa tỷ lệ               Class + Box                  Lọc box                  Kết quả
+
+
+
+
+                                 FPN là tùy chọn: mô hình nhỏ có thể bỏ để tiết kiệm RAM và độ trễ.
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                          OBJECT DETECTION / PIPELINE
+   TEXTCNN | CNN CHO DỮ LIỆU VĂN BẢN
+
+   INPUT TEXT    “Có bao nhiêu chai?”
+
+    Có           bao        nhiêu      chai        ?                                                CONV1D · filters
+                                                                                                                          k=2
+                           TOKEN IDs
+                                                                                                                          k=3
+
+
+                                                                                                                          k=4
+
+
+
+
+                                                                       EMBEDDING                        Trượt qua chuỗi token
+
+
+
+
+                         GLOBAL MAX                 CONCAT + DENSE                          SOFTMAX                      INTENT
+                            POOL
+
+
+                                        Conv1D trích xuất mẫu cụm từ; không dự đoán bounding box.
+
+
+EDGE AI CHALLENGE 2026                                                                                                  TEXTCNN / CONV1D
+   INTENT DETECTION | 5 NHÃN CỦA CUỘC THI
+               CÂU HỎI
+
+
+
+        “Có bao nhiêu                              Xác suất 5 nhãn
+
+           chai?”        TEXTCNN
+                                                   COUNT                              94%
+
+
+                                                   EXIST                               3%
+
+
+                                                   LIST                                2%
+
+
+                                                   LOCATION                            1%
+
+
+                                                   OUT_OF_SCOPE                        0%
+
+
+
+
+                         Object Detection                                3 chai
+                 COUNT
+                         Các bbox có nhãn “chai”
+
+
+
+EDGE AI CHALLENGE 2026                                               TEXTCNN / INTENT CLASSES
+     Pipeline Training hai mô hình
+
+
+
+              Dữ liệu + nhãn               Train / Val               Huấn luyện                  Evaluate                Lưu weights
+
+
+
+
+              TextCNN                                                           Object Detection
+
+              ▸   Input: token IDs                                              ▸   Input: ảnh + bounding boxes
+
+              ▸   Loss: Cross Entropy                                           ▸   Loss: lớp + tọa độ box
+
+              ▸   Metric: Accuracy                                              ▸   Metric: mAP50
+
+
+
+                                 Phân tích lỗi trên validation; không dùng dữ liệu test ẩn để train hoặc pseudo-label.
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                                                 11/14
+     Evaluate – đo chất lượng mô hình
+
+
+                         Detection: IoU và mAP50                         Intent: Accuracy
+                                        Dự đoán
+
+
+                                                                                        Số câu đúng
+                                                                   Accuracy =
+                                                                                         Tổng số câu
+
+
+                                                                        Đúng nhãn trong 5 intent.
+
+                    Ground truth
+
+
+
+
+                                     Điểm vòng bảng = 70 × mAP50 + 30 × Accuracy
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                 12/14
+    Quantization INT8 & triển khai Edge
+
+
+
+
+              Model FP32                  Quantization      TFLite Micro                       ESP32-S3
+              Huấn luyện                  FP32 → INT8    Operator tương thích                  Inference
+
+
+
+
+         ▸   Giảm kích thước lưu trữ weights.             ▸   Kiểm tra sai số sau Quantization.
+
+
+         ▸   Giảm bộ nhớ và chi phí tính toán.            ▸   Đo latency trên thiết bị thực.
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                     13/14
+    Kaggle Submission & Hands-on
+
+
+
+
+                Hai model                  Inference                 submission.csv                      Nộp Kaggle
+              đã huấn luyện                 trên test             DETECTION + INTENT                      xem điểm
+
+
+
+
+                                       Cột CSV: task_type, sample_id, prediction
+
+
+          ▸   DETECTION: JSON các bbox.                              ▸   Mỗi sample ID xuất hiện một lần.
+
+          ▸   INTENT: một nhãn trong 5 loại.                         ▸   Tối đa 4 submission / 24 giờ.
+
+
+
+                                        Demo: load weights → predict → kiểm tra CSV → submit.
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                                14/14
+    TỪ KAGGLE ĐẾN ESP32-S3
+
+     Huấn luyện trên PC, suy luận và trả lời trực tiếp trên thiết bị.
+
+
+   01                              02                03                          04                     05
+
+   TRAIN                           EVALUATE          CONVERT                     DEPLOY                 INFERENCE
+
+   CNN Detection                   mAP50, Accuracy   Quantization INT8           ESP-IDF                Camera + HTTP
+   Intent TextCNN                  Kiểm tra lỗi      TFLite model                TFLite Micro           JSON trả lời
+
+
+
+
+      VÒNG BẢNG                                                 CHUNG KẾT
+      Train + submit trên Kaggle                                Không offload ảnh/câu hỏi để suy luận
+
+
+
+
+EDGE AI CHALLENGE 2026                                                                                              15/24
+   PHẦN CỨNG ESP32-S3 N16R8
+
+
+                         CPU                        SRAM
+
+                         2 nhân Xtensa LX7          512 KB
+                         Tối đa 240 MHz             Bộ nhớ trong chip
+
+
+
+                         PSRAM                      FLASH
+
+                         8 MB                       16 MB
+                         RAM ngoài                  Lưu firmware + model
+
+
+
+
+                                  N16R8 = 16 MB Flash + 8 MB PSRAM
+
+
+
+
+EDGE AI CHALLENGE 2026                                                     16/24
+   SRAM, DRAM, PSRAM VÀ FLASH
+
+
+       SRAM NỘI          512 KB              RAM vật lý trong chip
+                                             Chứa heap nội, stack, buffer nhanh
+
+
+
+       DRAM              Một vùng của SRAM   Vùng địa chỉ dùng cho dữ liệu
+                                             Không phải chip RAM riêng
+
+
+
+       PSRAM NGOÀI       8 MB                Framebuffer lớn, tensor arena phù hợp
+                                             Truy cập chậm hơn SRAM nội
+
+
+
+       FLASH             16 MB               Firmware, hằng số và model INT8
+                                             Không dùng như RAM cấp phát động
+
+
+
+
+EDGE AI CHALLENGE 2026                                                               17/24
+  AI TIÊU THỤ RAM NHƯ THẾ NÀO?
+
+     Ví dụ bộ đệm ảnh 320 × 240 pixel (chưa gồm overhead):
+
+     Grayscale • 8-bit                                                              75 KiB
+
+
+
+     RGB565 • 16-bit                                                              150 KiB
+
+
+
+     RGB888 • 24-bit                                                              225 KiB
+
+
+
+
+     CÁC VÙNG NHỚ CẦN TÍNH CÙNG LÚC
+
+
+           Camera framebuffer          Input tensor          Tensor Arena   Stack / Wi-Fi / HTTP
+
+
+
+EDGE AI CHALLENGE 2026                                                                         18/24
+  CAMERA OV7670 → INPUT TENSOR
+
+
+                             01    CAPTURE               Khung hình
+                                                         320 × 240
+
+
+
+
+                             02    RESIZE                VD: 128 × 128
+                                                         Đúng model input
+
+
+
+
+                             03    QUANTIZE              Chuẩn hóa + INT8
+                                                         Đúng scale/zero-point
+
+
+
+                  OV7670           INVOKE                Detection
+                             04
+                                                         Class + bbox
+
+
+
+
+                           Preprocessing ở thiết bị phải khớp chính xác với lúc training.
+
+
+EDGE AI CHALLENGE 2026                                                                      19/24
+Đấu nối OV7670 theo repo mẫu
+
+   DATA BUS                           D0–D7                                         →            GPIO4–GPIO11
+
+
+   ĐỒNG BỘ                            XCLK / PCLK                                   →            GPIO12 / GPIO13
+
+
+   ĐỒNG BỘ                            VSYNC / HREF                                  →            GPIO14 / GPIO15
+
+
+   SCCB                               SDA / SCL                                     →            GPIO16 / GPIO17
+
+
+   NGUỒN                              3.3V / GND                                    →            3V3 / GND
+
+
+   ĐIỀU KHIỂN                         RST / PWDN                                    →            3.3V / GND
+
+
+   Dây ngắn, chung GND, kiểm tra pull-up SDA/SCL. XCLK mặc định 10 MHz; có thể giảm khi nhiễu.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                33 / 41
+Chạy thử camera với webstream
+
+
+    CỔNG 80                                          CỔNG 81                                   WI-FI
+
+
+
+    / → giao diện                                    :81/stream                                STA theo cấu hình
+
+    /capture → ảnh JPEG                              MJPEG liên tục                            Thất bại → SoftAP
+
+
+
+LUỒNG STREAM
+
+
+      OV7670             →            frame RGB565     →       frame2jpg          →         HTTP         →          trình duyệt
+
+
+
+   JPEG được nén bằng phần mềm, tốn CPU và ảnh hưởng tốc độ stream. Dùng một luồng stream khi kiểm thử; xem FPS trong log. Repo thử
+   với ESP-IDF 5.2.6.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                                   34 / 41
+Chuyển model: FP32 → INT8
+
+    TRƯỚC LƯỢNG TỬ                                                                                  SAU LƯỢNG TỬ
+
+
+                                                                  Converter
+    MODEL FP32                                 →                                             →      MODEL INT8
+                                                                  + calibration
+    32 bit / trọng số                                                                               8 bit / trọng số
+
+
+
+
+01                                     02                                    03                          04
+Representative dataset                 Đọc dtype, scale,                     Operator tương thích        So sánh Accuracy /
+                                       zero-point                            TFLM                        mAP50
+
+
+
+   Không suy ra dtype từ tên file. Với TextCNN, kiểm tra cả kiểu dữ liệu của token IDs.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                           35 / 41
+TFLite Micro: khởi tạo trước khi Invoke
+
+
+        model.cc
+                                      GetModel                  REGISTER_OPS                  MicroInterpreter               AllocateTensors
+        + model.h
+                               →                          →                            →                            →
+                                        Kiểm tra                                                                                 Sẵn sàng
+            Model                                                    Op resolver                    + arena
+                                        schema                                                                                    Invoke
+
+
+
+
+    MODEL_CONFIG.H                                                         TENSOR ARENA
+
+    32 × 32 × 3 · UINT8 · 10 lớp                                           Mẫu: 200 KiB trong PSRAM
+
+    Đây là cấu hình mẫu; cần thay theo model thực tế.                      Theo dõi AllocateTensors và mức sử dụng bộ nhớ.
+
+
+
+
+   Repo hiện là ví dụ phân loại ảnh qua HTTP; detection bbox và TextCNN cần bổ sung.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                                  36 / 41
+Kiểm thử inference qua HTTP
+
+    GET /ping                                               RESPONSE / JSON
+
+    Kiểm tra trạng thái                                     {
+                                                             "class": ...,
+    Trả kích thước input và số lớp của model.
+                                                             "score": ...,
+                                                             "scores": [...],
+                                                             "recv_ms": ...,
+    POST /infer                                              "infer_ms": ...,
+                                                             "total_ms": ...
+    Gửi ảnh raw                                             }
+    Body đúng W × H × C byte; không gửi file
+    JPEG vào endpoint mẫu.
+
+
+
+
+   Nếu đổi UINT8 → INT8: sửa đường đọc/ghi tensor và cách xử lý output cho đúng dtype.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                      37 / 41
+Cấu trúc hai project mẫu
+
+   esp32_c_infer_script                                                    ov7670_esp32s3_webstream
+
+     main/                                                                   main/
+
+     main.cpp                                                                main.c
+
+     model.cc / model.h                                                      Kconfig.projbuild
+
+     model_config.h                                                          CMakeLists.txt
+
+     wifi_config.h                                                           idf_component.yml
+
+     CMakeLists.txt                                                          sdkconfig.defaults
+
+     idf_component.yml
+
+
+
+
+   Hai project chạy riêng. Khi tích hợp, thống nhất app_main, component, Wi-Fi và HTTP server.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                   38 / 41
+Cấu hình → build → flash → kiểm thử
+
+                                                                                  Camera: Wi-Fi qua menuconfig
+     LỆNH CHẠY TRONG MỖI PROJECT
+                                                                                  Menu “OV7670 Webcam”
+
+     idf.py set-target esp32s3
+                                                                                  Inference: wifi_config.h
+     idf.py menuconfig                                                            Thay model.cc / model.h và model_config.h
+
+
+     idf.py build
+                                                                                  Kiểm tra PSRAM và Flash
+                                                                                  Camera repo mặc định Flash 4 MB; N16R8 có 16 MB.
+     idf.py -p <PORT> flash
+
+     idf.py -p <PORT> monitor                                                     Đọc IP và kiểm thử endpoint
+                                                                                  /ping, /infer; hoặc /capture, :81/stream
+
+
+
+
+   Giữ dependency và cấu hình build có thể tái tạo; lần build đầu cần tải component.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                                  39 / 41
+Ghép detection + TextCNN: phần cần bổ sung
+/ask, tokenizer, hai model và logic hỏi đáp chưa có sẵn trong hai repo mẫu.
+
+
+  CÂU HỎI                                 TEXTCNN + TỪ ĐIỂN
+
+  POST /ask                           →   Intent + lớp vật thể
+  Endpoint đề xuất
+                                                                                             LOGIC                    OUTPUT
+
+                                                                                             Đếm / tồn tại        →   JSON
+                                                                                             Danh sách / vị trí       trả lời
+  CAMERA                                  DETECTION
+
+  OV7670 → frame                      →   Preprocess → Invoke
+  thô                                     Decode / NMS
+
+
+
+
+   Mục tiêu chung kết: toàn bộ suy luận ở ESP32-S3; không offload ảnh/câu hỏi sang server.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                             40 / 41
+Checklist trước khi chạy toàn hệ thống
+
+    01 / CHẤT LƯỢNG                                                         02 / BỘ NHỚ
+
+
+    PC ↔ thiết bị                                                           Heap + arena + buffer
+    Đối chiếu output; đo mAP50 và Accuracy sau lượng tử.                    Kiểm tra heap trống, khối trống lớn nhất và bộ nhớ đỉnh.
+
+
+
+
+    03 / ĐỘ TRỄ                                                             04 / ỔN ĐỊNH
+
+
+    Tổng phản hồi ≤ 10 giây                                                 Nhiều lượt liên tiếp
+    Đo capture, tiền xử lý, inference và logic riêng.                       Test OOS, mất Wi-Fi; trả framebuffer và free JPEG.
+
+
+
+
+   Test từng nhánh trước → ghép hệ thống → ghi log → chốt cấu hình và bản build.
+
+
+EDGE AI CHALLENGE 2026 / TRAINING 1                                                                                                    41 / 41
+

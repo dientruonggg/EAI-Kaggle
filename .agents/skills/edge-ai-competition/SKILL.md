@@ -65,6 +65,17 @@ Ensembles, WBF across models/resolutions, and flip/multi-scale TTA are **banned*
 3. Max detections per image cap.
 Never tune on, train on, or pseudo-label the hidden test set.
 
+### 3.1. Full-Recall Decoding Invariant (Tránh bẫy Score Truncation)
+> [!CAUTION]
+> Tuyệt đối KHÔNG lọc bỏ dự đoán bằng ngưỡng score cao (>= 0.03 - 0.07) khi xuất file nộp mAP.
+> Việc cắt cụt score sẽ triệt tiêu đuôi Recall của đường cong PR, vứt bỏ các True Positive độ tự tin thấp và trực tiếp làm tụt 0.8% - 1.0% mAP trên Leaderboard.
+
+* **Cấu hình chuẩn khi xuất file nộp**:
+  - `score_thr = 0.001` (giữ nguyên dải Recall).
+  - `max_det = 100` (giới hạn tối đa 100 box có confidence cao nhất mỗi ảnh).
+  - `nms_iou = 0.58 - 0.60` (loại bỏ box trùng lặp).
+  - Tổng số box trên 4.000 ảnh test phải đạt khoảng **180.000 - 400.000 box** (45 - 100 box/ảnh). Nếu chỉ có ~50.000 box (~13 box/ảnh), chắc chắn file đang bị lỗi cắt cụt ngưỡng score.
+
 ---
 
 ## 4. Pre-Submission Gate
@@ -76,3 +87,25 @@ Before any `kaggle competitions submit` (user must approve each one; max 4 / 24 
 2. **Provenance**: predictions produced by the INT8 `.tflite` that satisfies the constraints; log its path, size, and param count with the CSV. Declare any pretrained weights used.
 3. **Box-count sanity**: report total boxes and boxes/image and compare with the validation-calibrated expectation. (The warm-up 2,600-2,800 rule does not apply to this dataset.)
 4. **Local score**: report local `70 x mAP50 + 30 x acc` next to the file name.
+
+---
+
+## 5. Target Assignment, Loss & Augmentation Guardrails
+
+1. **Bẫy Nhãn Lờ Đi `-2` (Border Ignore Label Trap)**:
+   - Nếu đánh dấu toàn bộ ô viền trong box ngoài tâm là `-2` (trọng số loss nền = 0.0), hơn 40% lưới bị mất giám sát âm tính. Logit nền sẽ trôi lên cao và sinh False Positive hàng loạt ở ngưỡng thấp.
+   - **Quy tắc**: Dùng gán nhãn Area-Adaptive gốc (bảo toàn 100% giám sát nền), hoặc nếu làm mịn viền thì chỉ dùng **Soft Border Weight = 0.25**, tuyệt đối không zero-out hoàn toàn (0.0).
+
+2. **Quy tắc Không Xoay Bounding Box (`rotate = 0.0`)**:
+   - Xoay box chữ nhật $\pm 20^\circ$ làm diện tích box phình to $1.3\times$, làm loãng nhãn của vật thể nhỏ (mouse, toy_car, phone).
+   - **Quy tắc**: Giữ `rotate = 0.0`. Chỉ dùng scale zoom-out `(0.60, 1.25)` để tăng tần suất xuất hiện vật thể nhỏ và đóng mosaic 25-35 epoch cuối.
+
+3. **Phạt Nặng Vật Thể Nhỏ (Small-Object Scale Loss)**:
+   - Áp dụng hệ số tỷ lệ nghịch với căn diện tích:
+     $$w_{\text{size}} = \text{clip}\left(\frac{24.0}{\sqrt{w \times h}}, 1.0, 2.5\right)$$
+   - Áp dụng vào EIoU box loss để ép gradient tập trung chính xác vào vật thể $< 16$ px và $16-24$ px.
+
+4. **Quy tắc Log Huấn luyện & Đánh giá**:
+   - Đánh giá validation loss & `val_mAP50` trên từng epoch (`eval_every = 1`).
+   - Chỉ in bảng chi tiết AP của toàn bộ 7 lớp (`bottle`, `cup`, `phone`, `book`, `mouse`, `box`, `toy_car`) khi đạt kỷ lục mới (`is_best == True`). Các epoch bình thường chỉ in tóm tắt 1 dòng để log tinh gọn, trực quan.
+

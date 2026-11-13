@@ -52,17 +52,10 @@ TARGET_ALIASES = [
     'cai o to do choi', 'cai oto do choi', 'o to do choi', 'oto', 'o to'
 ]
 
-# Calibrated Thresholds at NMS IoU = 0.58
-SWEETSPOT_THRESHOLDS = {
-    "bottle": 0.05,
-    "cup": 0.05,
-    "phone": 0.07,
-    "book": 0.04,
-    "mouse": 0.05,
-    "box": 0.05,
-    "toy_car": 0.03
-}
+# Full-Recall Decoding Configuration (Zero Artificial Truncation, standard mAP evaluation)
 BEST_NMS_IOU = 0.58
+SCORE_THR = 0.001
+MAX_DET = 100
 
 
 def remove_accents(text):
@@ -172,24 +165,22 @@ def main():
         dq_cls = dq_cls.transpose(2, 0, 1)[None, ...]
         dq_box = dq_box.transpose(2, 0, 1)[None, ...]
 
-        dets = decode_batch_np(dq_cls, dq_box, score_thr=0.001, nms_iou=BEST_NMS_IOU)[0]
+        dets = decode_batch_np(dq_cls, dq_box, score_thr=SCORE_THR, nms_iou=BEST_NMS_IOU, max_det=MAX_DET)[0]
 
-        # Filter by sweetspot thresholds
+        # Full-recall box collection without premature score cutoff (preserves PR curve)
         boxes_json = []
         for row in dets:
             cid = int(row[5])
-            cname = CLASS_NAMES[cid]
             score = float(row[4])
-            if score >= SWEETSPOT_THRESHOLDS[cname]:
-                x1, y1, x2, y2 = map(float, row[:4])
-                boxes_json.append({
-                    "class_id": cid,
-                    "score": round(score, 4),
-                    "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)]
-                })
+            x1, y1, x2, y2 = map(float, row[:4])
+            boxes_json.append({
+                "class_id": cid,
+                "score": round(score, 5),
+                "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)]
+            })
 
         total_boxes += len(boxes_json)
-        pred_str = json.dumps(boxes_json)
+        pred_str = json.dumps(boxes_json, separators=(",", ":"))
         detection_rows.append(["DETECTION", stem, pred_str])
 
         if (idx + 1) % 1000 == 0:

@@ -1,0 +1,14 @@
+{
+  "epochs": 200,
+  "batch_size": 64,
+  "lr": 0.00015,
+  "min_lr": 2e-06,
+  "w_box": 5.5,
+  "w_neg": 1.5,
+  "w_mutual": 3.0,
+  "iou_gate": 0.48,
+  "init_weights": "qualifiers/weights/dtnet_p2_ultra_finetune/best_p2_ultra_finetune.pt",
+  "data_dir": "qualifiers/data",
+  "output_dir": "qualifiers/weights/dtnet_clean_p2_200ep",
+  "num_workers": 4
+}
