@@ -91,13 +91,18 @@ def main():
     parser.add_argument("--w_neg", type=float, default=1.5, help="Negative background multiplier (default: 1.5)")
     parser.add_argument("--w_mutual", type=float, default=3.0, help="Cross-class mutual exclusion multiplier (default: 3.0)")
     parser.add_argument("--close_mosaic", type=int, default=50, help="Epochs before end to close Mosaic (default: 50)")
+    parser.add_argument("--scratch", action="store_true", help="Force train strictly from scratch (ignore initial weights)")
     parser.add_argument("--init_weights", type=str,
-                        default="qualifiers/weights/dtnet_clean_p2_200ep/best_dtnet_clean_200ep.pt",
-                        help="Initial checkpoint to fine-tune from")
+                        default="",
+                        help="Initial checkpoint to fine-tune from (leave empty for scratch training)")
     parser.add_argument("--data_dir", type=str, default="qualifiers/data", help="Path to data directory")
     parser.add_argument("--output_dir", type=str, default="qualifiers/weights/dtnet_nwd_tal_full6k", help="Output directory")
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers (default: 4)")
     args = parser.parse_args()
+
+    if args.scratch or not args.init_weights:
+        args.init_weights = None
+        print("[*] Training strictly from SCRATCH (random Gaussian / Kaiming init, zero prior weights).", flush=True)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

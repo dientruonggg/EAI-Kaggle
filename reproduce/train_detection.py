@@ -38,6 +38,8 @@ def main():
     parser.add_argument("--lr", type=float, default=1.2e-4, help="Learning rate (default: 1.2e-4)")
     parser.add_argument("--data_dir", type=str, default=None, help="Dataset directory")
     parser.add_argument("--output_dir", type=str, default=str(CURRENT_DIR / "weights"), help="Weights output directory")
+    parser.add_argument("--scratch", action="store_true", help="Train strictly from scratch (random weights, no checkpoint)")
+    parser.add_argument("--init_weights", type=str, default="", help="Initial checkpoint path if resuming/finetuning")
     parser.add_argument("--skip_train", action="store_true", help="Skip training and run only INT8 export + calibration")
     args = parser.parse_args()
 
@@ -78,6 +80,10 @@ def main():
             "--data_dir", str(data_dir),
             "--output_dir", str(output_dir)
         ]
+        if args.scratch:
+            train_cmd.append("--scratch")
+        elif args.init_weights:
+            train_cmd.extend(["--init_weights", args.init_weights])
         print(f"\n[*] Executing training: {' '.join(train_cmd)}")
         res = subprocess.run(train_cmd)
         if res.returncode != 0:

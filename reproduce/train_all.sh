@@ -17,13 +17,19 @@ echo "==========================================================================
 echo "   EDGE AI CHALLENGE 2026 - FULL REPRODUCTION PIPELINE (TRAIN -> EXPORT -> SUBMIT)"
 echo "================================================================================"
 
+EXTRA_FLAGS=()
+if [ "$1" == "--scratch" ]; then
+    EXTRA_FLAGS+=("--scratch")
+    echo "[*] Mode: Pure SCRATCH Training (zero pretrained weights)"
+fi
+
 echo ""
 echo "[1/3] Training Vietnamese Question Intent TextCNN (ESP32-S3 INT8)..."
 python3 "$SCRIPT_DIR/train_intent.py" --output_dir "$SCRIPT_DIR/weights"
 
 echo ""
 echo "[2/3] Training Object Detection DTNet-NWD-TAL (MobileNetV3 + P2 skip, 197k params <= 200,000)..."
-python3 "$SCRIPT_DIR/train_detection.py" --output_dir "$SCRIPT_DIR/weights"
+python3 "$SCRIPT_DIR/train_detection.py" --output_dir "$SCRIPT_DIR/weights" "${EXTRA_FLAGS[@]}"
 
 echo ""
 echo "[3/3] Generating final submission.csv with Sweetspot Calibrated Thresholds..."
