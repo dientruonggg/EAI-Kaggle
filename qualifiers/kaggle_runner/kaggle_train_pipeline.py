@@ -436,9 +436,6 @@ class Full6kDetDataset(Dataset):
         if (orig_w, orig_h) != (self.img_w, self.img_h):
             rgb = cv2.resize(rgb, (self.img_w, self.img_h), interpolation=cv2.INTER_AREA)
         boxes = self.labels[idx].copy()
-        if len(boxes) > 0:
-            boxes[:, [1, 3]] = boxes[:, [1, 3]] * self.img_w
-            boxes[:, [2, 4]] = boxes[:, [2, 4]] * self.img_h
         return rgb, boxes
 
     def __getitem__(self, idx):
@@ -851,11 +848,14 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
                 for line in f:
                     parts = line.strip().split()
                     if len(parts) >= 5:
-                        c, cx, cy, w, h = map(float, parts[:5])
-                        x1, y1 = cx - w / 2.0, cy - h / 2.0
-                        x2, y2 = cx + w / 2.0, cy + h / 2.0
+                        c = int(parts[0])
+                        cx, cy, w, h = map(float, parts[1:5])
+                        x1 = (cx - w / 2.0) * ORIG_W
+                        y1 = (cy - h / 2.0) * ORIG_H
+                        x2 = (cx + w / 2.0) * ORIG_W
+                        y2 = (cy + h / 2.0) * ORIG_H
                         rows.append([c, x1, y1, x2, y2])
-        all_lbls.append(np.array(rows, dtype=np.float32).reshape(-1, 5))
+        all_lbls.append(np.asarray(rows, dtype=np.float32).reshape(-1, 5))
 
     val_pool_imgs = val_imgs
     val_pool_lbls = all_lbls[len(train_imgs):]
@@ -902,7 +902,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
          {"params": no_decay_params, "weight_decay": 0.0}],
         lr=lr_eff_s1, betas=(0.9, 0.999)
     )
-    scaler_s1 = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+    scaler_s1 = torch.amp.GradScaler(device.type, enabled=(device.type == "cuda"))
 
     steps_per_epoch_s1 = len(train_loader_s1)
     total_steps_s1 = stage1_epochs * steps_per_epoch_s1
@@ -941,7 +941,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
             box_t = box_t.to(device, non_blocking=True)
 
             optimizer_s1.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+            with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
                 cls_logit, box_raw = model(imgs)
                 loss, loss_c, loss_b = det_loss_qfl_ciou(
                     cls_logit, box_raw, cls_idx, box_t, lam=lam, w_cls=1.0, w_box=2.5, qfl_beta=2.0
@@ -972,7 +972,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
                 for batch in eval_loader:
                     imgs, _, _, _ = batch
                     imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-                    with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                    with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
                         c_pred, b_pred = ema.ema(imgs)
                     dets = decode_batch_np(c_pred.cpu().numpy(), b_pred.cpu().numpy(),
                                            score_thr=0.001, nms_iou=0.65, max_det=100)
@@ -1033,7 +1033,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
          {"params": no_decay_params, "weight_decay": 0.0}],
         lr=lr_eff_s2, betas=(0.9, 0.999)
     )
-    scaler_s2 = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+    scaler_s2 = torch.amp.GradScaler(device.type, enabled=(device.type == "cuda"))
 
     steps_per_epoch_s2 = len(train_loader_s2)
     total_steps_s2 = stage2_epochs * steps_per_epoch_s2
@@ -1071,7 +1071,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
             gt_bboxes = gt_bboxes.to(device, non_blocking=True)
 
             optimizer_s2.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+            with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
                 cls_logit, box_raw = model(imgs)
                 loss, loss_c, loss_b = det_loss_tal_nwd(
                     cls_logit, box_raw, gt_labels, gt_bboxes, assigner,
@@ -1103,7 +1103,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
                 for batch in eval_loader:
                     imgs, _, _, _ = batch
                     imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-                    with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                    with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
                         c_pred, b_pred = ema.ema(imgs)
                     dets = decode_batch_np(c_pred.cpu().numpy(), b_pred.cpu().numpy(),
                                            score_thr=0.001, nms_iou=0.65, max_det=100)
