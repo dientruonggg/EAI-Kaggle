@@ -71,9 +71,22 @@ reproduce/
 ├── README.md                      # Hướng dẫn chi tiết thẩm định và tái tạo
 ├── requirements.txt               # Danh sách thư viện và phiên bản chuẩn xác
 ├── run_reproduce.py               # Script suy luận tái tạo submission.csv (< 30 giây)
-├── train_detection.py             # Source code huấn luyện DTNet từ đầu
+├── train_detection.py             # Entrypoint huấn luyện DTNetMax 197k từ đầu
 ├── train_intent.py                # Source code huấn luyện TextCNN ý định từ đầu
 ├── train_all.sh                   # Script bash 1 chạm chạy toàn bộ pipeline
+├── output/                        # Thư mục chứa kết quả chạy và thẩm định
+│   ├── submission.csv             # File submission vàng 8,000 dòng chuẩn BTC
+│   ├── submission_validation_report.txt # Báo cáo kiểm định 100% luật thi
+│   ├── hardware_audit_report.txt  # Báo cáo thẩm định ràng buộc phần cứng ESP32-S3
+│   └── preview_samples.png        # Ảnh trực quan hóa bounding box trên ảnh test
+├── training_detection/            # Chi tiết mã nguồn huấn luyện TAL + NWD
+│   ├── dtnet_max.py               # Kiến trúc mạng 197,647 params
+│   ├── dataset.py                 # DataLoader + Mosaic + Augmentation
+│   ├── loss.py                    # Task-Aligned Assigner + NWD loss
+│   ├── train.py                   # Vòng lặp huấn luyện chính 300 epochs
+│   ├── evaluation.py              # Bộ tính VOC mAP50 và EMA
+│   ├── export_int8.py             # Lượng tử hóa Full INT8 PTQ cho TFLM
+│   └── calibrate.py               # Thẩm định ngưỡng điểm ngọt
 └── weights/                       # Thư mục trọng số mô hình chính thức
     ├── dtnet_nwd_tal_full6k_int8.tflite # Detection Full INT8 (280 KB, 197,647 params)
     ├── best_dtnet_nwd_tal_full6k.pt     # Checkpoint PyTorch gốc (830 KB)

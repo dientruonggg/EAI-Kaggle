@@ -479,6 +479,15 @@ with open(output_csv_path, "w", newline="", encoding="utf-8") as f:
 
 out_size_bytes = os.path.getsize(output_csv_path)
 
+# Lưu thêm một bản sao trong output/
+output_dir = Path("output")
+try:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copy2(output_csv_path, output_dir / "submission.csv")
+except Exception:
+    pass
+
 # Bộ kiểm định Pre-Submission Gate
 def validate_submission(csv_path):
     with open(csv_path, "r", encoding="utf-8") as f:
@@ -521,6 +530,7 @@ total_r, d_cnt, i_cnt, b_cnt = validate_submission(output_csv_path)
 print("=" * 80)
 print(f" [★ SUCCESS] File nộp bài đã được tạo thành công: {output_csv_path.resolve()}")
 print(f" Tổng số dòng dữ liệu : {total_r:,} dòng ({d_cnt:,} DETECTION + {i_cnt:,} INTENT)")
+print(f" Tổng số bounding box  : {b_cnt:,} boxes (Mật độ điểm ngọt: {b_cnt/d_cnt:.2f} boxes/ảnh)")
 print(f" Dung lượng file       : {out_size_bytes:,} bytes ({out_size_bytes/1024/1024:.2f} MB)")
 print(f" Trạng thái kiểm định  : 100% COMPLIANT VỚI TẤT CẢ QUY ĐỊNH CỦA BTC -> [PASSED]")
 print("=" * 80)

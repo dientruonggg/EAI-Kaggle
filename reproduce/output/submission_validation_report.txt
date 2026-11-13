@@ -1,0 +1,9 @@
+EDGE AI CHALLENGE 2026 - SUBMISSION VALIDATION REPORT
+============================================================
+Target File         : /home/bim/Projects/EAI-2026/reproduce/output/submission.csv
+Total Rows          : 8000 (4000 DETECTION + 4000 INTENT)
+Total Detected Boxes: 61,941 (15.49 boxes/image)
+Intent Distribution : {'LIST': 800, 'EXIST': 800, 'COUNT': 800, 'OUT_OF_SCOPE': 800, 'LOCATION': 800}
+Detection Model Size: 280,856 bytes (< 1,536,000 bytes)
+Intent Model Size   : 38,592 bytes (< 1,536,000 bytes)
+Status              : 100% COMPLIANT & VALIDATED [PASSED]

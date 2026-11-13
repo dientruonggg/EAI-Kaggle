@@ -22,7 +22,7 @@ echo "[1/3] Training Vietnamese Question Intent TextCNN (ESP32-S3 INT8)..."
 python3 "$SCRIPT_DIR/train_intent.py" --output_dir "$SCRIPT_DIR/weights"
 
 echo ""
-echo "[2/3] Training Object Detection DTNet-P2 (Stride-4 P2 skip, 191k params)..."
+echo "[2/3] Training Object Detection DTNet-NWD-TAL (MobileNetV3 + P2 skip, 197k params <= 200,000)..."
 python3 "$SCRIPT_DIR/train_detection.py" --output_dir "$SCRIPT_DIR/weights"
 
 echo ""
