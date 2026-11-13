@@ -217,9 +217,6 @@ def train_and_export_intent(data_root):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     converter.representative_dataset = rep_data
-    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-    converter.inference_input_type = tf.int32
-    converter.inference_output_type = tf.int8
     tflite_model = converter.convert()
 
     tflite_path = OUTPUT_DIR / "text_cnn_int8.tflite"
@@ -819,7 +816,7 @@ def train_detection_scratch(data_root, epochs=250, batch_size=64, lr=1.2e-4):
          {"params": no_decay_params, "weight_decay": 0.0}],
         lr=lr_eff, betas=(0.9, 0.999)
     )
-    scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
 
     warmup_epochs = 3
     steps_per_epoch = len(train_loader)
@@ -863,7 +860,7 @@ def train_detection_scratch(data_root, epochs=250, batch_size=64, lr=1.2e-4):
             gt_bboxes = gt_bboxes.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                 cls_logit, box_raw = model(imgs)
                 loss, loss_c, loss_b = det_loss_tal_nwd(
                     cls_logit, box_raw, gt_labels, gt_bboxes, assigner,
@@ -896,7 +893,7 @@ def train_detection_scratch(data_root, epochs=250, batch_size=64, lr=1.2e-4):
                 for batch in eval_loader:
                     imgs, gt_labels, gt_bboxes, _ = batch
                     imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-                    with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
+                    with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                         c_pred, b_pred = ema.ema(imgs)
                     dets = decode_batch_np(c_pred.cpu().numpy(), b_pred.cpu().numpy(),
                                            score_thr=0.001, nms_iou=0.65, max_det=100)
