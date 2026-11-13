@@ -28,7 +28,7 @@ np.random.seed(42)
 tf.random.set_seed(42)
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR)))
 
 INTENT_MAP = {
     0: "COUNT",
@@ -154,18 +154,38 @@ def main():
             train_labels.append(l)
 
     print(f"[✔] Dataset pooled: {len(train_texts):,} unique real human-written questions (zero pseudo)")
-    print(f"[✔] Validation set: {len(vl_t):,} samples")
+
+    if len(vl_t) == 0:
+        print("[!] intent_val.csv not found. Creating 10% validation split from pooled training data...")
+        np.random.seed(42)
+        n_samples = len(train_texts)
+        indices = np.random.permutation(n_samples)
+        split_idx = int(0.9 * n_samples)
+        train_indices, val_indices = indices[:split_idx], indices[split_idx:]
+
+        vl_texts = [train_texts[i] for i in val_indices]
+        vl_l = [train_labels[i] for i in val_indices]
+        tr_texts = [train_texts[i] for i in train_indices]
+        tr_labels = [train_labels[i] for i in train_indices]
+    else:
+        tr_texts = train_texts
+        tr_labels = train_labels
+        vl_texts = vl_t
+
+    print(f"[✔] Training set: {len(tr_texts):,} samples | Validation set: {len(vl_texts):,} samples")
 
     def encode(texts, max_len=18):
         encoded = []
         for t in texts:
             tokens = [vocab.get(w, 1) for w in clean_and_tokenize(t)][:max_len]
             encoded.append(tokens + [0] * (max_len - len(tokens)))
+        if not encoded:
+            return np.zeros((0, max_len), dtype=np.int32)
         return np.array(encoded, dtype=np.int32)
 
-    X_train = encode(train_texts)
-    y_train = tf.keras.utils.to_categorical(train_labels, 5)
-    X_val = encode(vl_t)
+    X_train = encode(tr_texts)
+    y_train = tf.keras.utils.to_categorical(tr_labels, 5)
+    X_val = encode(vl_texts)
     y_val = tf.keras.utils.to_categorical(vl_l, 5)
 
     # 3. Model Build & Training
@@ -186,7 +206,7 @@ def main():
         validation_data=(X_val, y_val),
         epochs=args.epochs,
         batch_size=args.batch_size,
-        verbose=1
+        verbose=2
     )
 
     tr_loss, tr_acc = model.evaluate(X_train, y_train, verbose=0)
@@ -252,7 +272,7 @@ def main():
         # Write intent_preds.csv
         sub_paths = [
             os.path.join(PROJECT_ROOT, "qualifiers/submissions/intent_preds.csv"),
-            os.path.join(PROJECT_ROOT, "intent_only_submission.csv")
+            os.path.join(PROJECT_ROOT, "intent_champion_submission.csv")
         ]
         for sp in sub_paths:
             os.makedirs(os.path.dirname(sp), exist_ok=True)

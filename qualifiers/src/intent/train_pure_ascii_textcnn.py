@@ -270,7 +270,7 @@ def train_and_export(
         epochs=epochs,
         batch_size=batch_size,
         callbacks=cb_list,
-        verbose=1
+        verbose=2
     )
 
     # 6. Evaluate Floating-Point Model
@@ -346,6 +346,7 @@ def train_and_export(
         repo_root = os.path.dirname(qualifiers_dir)
         sub_paths = [
             os.path.join(output_dir, "pure_ascii_intent_preds.csv"),
+            os.path.join(repo_root, "intent_pure_ascii_submission.csv"),
             os.path.join(repo_root, "intent_only_submission.csv"),
             os.path.join(qualifiers_dir, "submissions/intent_preds.csv")
         ]
