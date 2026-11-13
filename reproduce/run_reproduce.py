@@ -3,7 +3,7 @@
 EDGE AI CHALLENGE 2026 (QUALIFIERS) - CHAMPION REPRODUCTION PIPELINE
 --------------------------------------------------------------------
 Minimal, standalone, 1-command script to reproduce the championship submission.csv
-(Score 98.59+) using purely edge-constrained Full INT8 TFLite models on ESP32-S3 standard.
+using purely edge-constrained Full INT8 TFLite models on ESP32-S3 standard.
 
 Zero heavy dependencies. Requires only: numpy, opencv-python, tensorflow
 Run:
@@ -26,7 +26,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import tensorflow as tf
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DET_MODEL = os.path.join(CURRENT_DIR, "weights/dtnet_p2_int8.tflite")
+DEFAULT_DET_MODEL = os.path.join(CURRENT_DIR, "weights/dtnet_nwd_tal_full6k_int8.tflite")
 DEFAULT_INTENT_MODEL = os.path.join(CURRENT_DIR, "weights/text_cnn_int8.tflite")
 DEFAULT_VOCAB = os.path.join(CURRENT_DIR, "weights/text_cnn_vocab.json")
 
@@ -39,8 +39,8 @@ CLASS_NAMES = ["bottle", "cup", "phone", "book", "mouse", "box", "toy_car"]
 INTENT_CLASSES = ["COUNT", "EXIST", "LIST", "LOCATION", "OUT_OF_SCOPE"]
 
 # Champion Sweetspot Calibrated Thresholds
-SWEETSPOT_THRESHOLDS = [0.05, 0.05, 0.07, 0.04, 0.05, 0.05, 0.03]
-NMS_IOU_THRESH = 0.55
+SCORE_THRESH = 0.045
+NMS_IOU_THRESH = 0.65
 
 
 def _sigmoid(x):
@@ -70,7 +70,7 @@ def nms_np(boxes, scores, thr, max_keep=100):
     return np.asarray(keep, dtype=np.int64)
 
 
-def decode_batch_np(cls_logit, box_raw, score_thr=0.001, nms_iou=NMS_IOU_THRESH,
+def decode_batch_np(cls_logit, box_raw, score_thr=SCORE_THRESH, nms_iou=NMS_IOU_THRESH,
                     pre_nms=1000, max_det=100, stride=STRIDE, max_dist=20.0,
                     orig_w=ORIG_W, orig_h=ORIG_H):
     """Decodes decoupled anchor-free classification logits and bounding box offsets."""
@@ -128,8 +128,8 @@ def clean_and_tokenize(text):
     return [w for w in text.split() if w and w not in STOPWORDS]
 
 
-def run_detection_inference(tflite_path, test_image_dir, thresholds=SWEETSPOT_THRESHOLDS):
-    """Runs single-pass INT8 inference using DTNet-P2."""
+def run_detection_inference(tflite_path, test_image_dir, score_thr=SCORE_THRESH, nms_iou=NMS_IOU_THRESH):
+    """Runs single-pass INT8 inference using DTNet-NWD-TAL-Full6K."""
     print(f"[*] Loading Object Detection INT8 Model: {tflite_path}")
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
@@ -150,7 +150,7 @@ def run_detection_inference(tflite_path, test_image_dir, thresholds=SWEETSPOT_TH
     if not image_paths:
         raise FileNotFoundError(f"No test images found in {test_image_dir}!")
 
-    print(f"[*] Processing {len(image_paths)} test images with DTNet-P2 ({IMG_W}x{IMG_H} INT8)...")
+    print(f"[*] Processing {len(image_paths)} test images with DTNet ({IMG_W}x{IMG_H} INT8)...")
 
     detection_results = []
     total_boxes = 0
@@ -171,32 +171,30 @@ def run_detection_inference(tflite_path, test_image_dir, thresholds=SWEETSPOT_TH
         interpreter.set_tensor(input_details["index"], quant_in[np.newaxis, ...])
         interpreter.invoke()
 
-        q_cls = interpreter.get_tensor(output_details[cls_idx]["index"])
-        q_box = interpreter.get_tensor(output_details[box_idx]["index"])
+        q_cls = interpreter.get_tensor(output_details[cls_idx]["index"])[0].astype(np.float32)
+        q_box = interpreter.get_tensor(output_details[box_idx]["index"])[0].astype(np.float32)
 
         # Dequantize to Float32 for external decode
-        f_cls = (q_cls.astype(np.float32) - cls_zp) * cls_scale
-        f_box = (q_box.astype(np.float32) - box_zp) * box_scale
+        dq_cls = (q_cls - cls_zp) * cls_scale
+        dq_box = (q_box - box_zp) * box_scale
 
-        # Transpose [B, H, W, C] -> [B, C, H, W] for anchor-free decoding
-        raw_dets = decode_batch_np(
-            f_cls.transpose(0, 3, 1, 2),
-            f_box.transpose(0, 3, 1, 2),
-            score_thr=0.001,
-            nms_iou=NMS_IOU_THRESH
-        )[0]
+        dq_cls = dq_cls.transpose(2, 0, 1)[None, ...]
+        dq_box = dq_box.transpose(2, 0, 1)[None, ...]
 
-        # Apply Sweetspot Calibrated Thresholds per class
-        if len(raw_dets) > 0:
-            keep = np.array([row[4] >= thresholds[int(row[5])] for row in raw_dets])
-            raw_dets = raw_dets[keep]
+        # Anchor-free decoding and NMS
+        raw_dets = decode_batch_np(dq_cls, dq_box, score_thr=score_thr, nms_iou=nms_iou, max_det=100)[0]
 
         boxes_json = []
         for row in raw_dets:
+            cid = int(row[5])
+            score = float(row[4])
+            x1, y1, x2, y2 = map(float, row[:4])
+            if x2 <= x1 or y2 <= y1:
+                continue
             boxes_json.append({
-                "class_id": int(row[5]),
-                "score": round(float(row[4]), 5),
-                "bbox": [round(float(v), 2) for v in row[:4]]
+                "class_id": cid,
+                "score": round(score, 5),
+                "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)]
             })
 
         total_boxes += len(boxes_json)
@@ -232,7 +230,7 @@ def has_target_class(text):
 
 
 def run_intent_inference(tflite_path, vocab_path, qa_csv_path):
-    """Predicts question intents using 26 KB Full INT8 Text-CNN on ESP32-S3."""
+    """Predicts question intents using 38 KB Full INT8 Text-CNN on ESP32-S3."""
     print(f"[*] Loading Intent Classification INT8 Model: {tflite_path}")
     with open(vocab_path, "r", encoding="utf-8") as f:
         vocab = json.load(f)
@@ -286,11 +284,13 @@ def find_default_path(candidates):
 def main():
     parser = argparse.ArgumentParser(description="Reproduce Edge AI Challenge 2026 Champion Submission")
     parser.add_argument("--test_images", default=None, help="Path to test images directory")
-    parser.add_argument("--qa_test", default=None, help="Path to qa_test.csv")
+    parser.add_argument("--qa_test", default=None, help="Path to qa_test.csv or intent_test.csv")
     parser.add_argument("--output", default="submission.csv", help="Output submission CSV path")
-    parser.add_argument("--det_model", default=DEFAULT_DET_MODEL, help="Path to DTNet-P2 INT8 TFLite")
+    parser.add_argument("--det_model", default=DEFAULT_DET_MODEL, help="Path to DTNet INT8 TFLite")
     parser.add_argument("--intent_model", default=DEFAULT_INTENT_MODEL, help="Path to TextCNN INT8 TFLite")
     parser.add_argument("--intent_vocab", default=DEFAULT_VOCAB, help="Path to TextCNN vocab JSON")
+    parser.add_argument("--score_thr", type=float, default=SCORE_THRESH, help="Detection score threshold")
+    parser.add_argument("--nms_iou", type=float, default=NMS_IOU_THRESH, help="NMS IoU threshold")
     args = parser.parse_args()
 
     project_root = os.path.dirname(CURRENT_DIR)
@@ -313,12 +313,13 @@ def main():
 
     print("=" * 80)
     print("   EDGE AI CHALLENGE 2026 - CHAMPION REPRODUCTION RUNNER")
-    print("   Detection Model : DTNet-P2 INT8 (191,579 params, 266 KB Flash)")
-    print("   Intent Model    : TextCNN INT8 (17,408 params, 23 KB Flash)")
+    print(f"   Detection Model : {os.path.basename(args.det_model)} ({os.path.getsize(args.det_model):,} bytes)")
+    print(f"   Intent Model    : {os.path.basename(args.intent_model)} ({os.path.getsize(args.intent_model):,} bytes)")
+    print(f"   Calibration     : Score Thr = {args.score_thr}, NMS IoU = {args.nms_iou}")
     print("   Target Hardware : ESP32-S3 (Xtensa LX7 @ 240MHz, Full INT8 TFLM)")
     print("=" * 80)
 
-    det_rows = run_detection_inference(args.det_model, test_images)
+    det_rows = run_detection_inference(args.det_model, test_images, score_thr=args.score_thr, nms_iou=args.nms_iou)
     intent_rows = run_intent_inference(args.intent_model, args.intent_vocab, qa_test)
 
     all_rows = det_rows + intent_rows
@@ -331,7 +332,7 @@ def main():
     print("\n" + "=" * 80)
     print(f" [★ SUCCESS] Champion Submission generated at: {args.output}")
     print(f" Total Rows: {len(all_rows)} ({len(det_rows)} DETECTION + {len(intent_rows)} INTENT)")
-    print(f" Hardware Footprint: < 290 KB Total Flash (Budget: 1,536 KB)")
+    print(f" Hardware Footprint: < 320 KB Total Flash (Budget: 1,536 KB)")
     print("=" * 80 + "\n")
 
 
