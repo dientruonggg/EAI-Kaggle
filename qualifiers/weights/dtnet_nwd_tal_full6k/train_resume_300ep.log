@@ -1,0 +1,168 @@
+[✔] Configuration saved to qualifiers/weights/dtnet_nwd_tal_full6k/training_config.json
+[✔] Pooled Full Dataset: 6000 Total Images (5400 train + 600 val)
+[✔] Evaluation Tracking Split: 600 validation images
+
+[Hardware Gate] Strict Parameters: 197,647 / 200,000
+[*] Loading initial checkpoint from: qualifiers/weights/dtnet_nwd_tal_full6k/latest_dtnet_nwd_tal_full6k.pt
+[✔] Resuming from Epoch 201 with baseline mAP50: 98.60%
+[*] Commencing Vectorized Full-6K TAL+NWD Training on cuda (Epochs 201->300, Close-Mosaic at Ep 150)...
+
+/home/dutai/EAI-2026/dtnet_nwd_tal_full6k/evaluation.py:18: RuntimeWarning: overflow encountered in exp
+  return 1.0 / (1.0 + np.exp(-np.clip(x, -30, 30)))
+Epoch 201/300 [12.2s, 131ms/step] loss: 3.7336 (cls: 0.1084, box: 0.6591) | val_mAP50: 98.60% | lr: 6.1150e-05
+[★ NEW BEST] Val mAP50: 98.60% (Epoch 201)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 202/300 [12.0s, 129ms/step] loss: 3.7264 (cls: 0.1056, box: 0.6583) | val_mAP50: 98.60% | lr: 6.0069e-05
+[★ NEW BEST] Val mAP50: 98.60% (Epoch 202)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 203/300 [12.1s, 130ms/step] loss: 3.7187 (cls: 0.1054, box: 0.6570) | val_mAP50: 98.60% | lr: 5.8995e-05
+[★ NEW BEST] Val mAP50: 98.60% (Epoch 203)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 204/300 [11.9s, 128ms/step] loss: 3.7151 (cls: 0.1036, box: 0.6566) | val_mAP50: 98.61% | lr: 5.7927e-05
+[★ NEW BEST] Val mAP50: 98.61% (Epoch 204)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 205/300 [12.0s, 129ms/step] loss: 3.7228 (cls: 0.1033, box: 0.6581) | val_mAP50: 98.60% | lr: 5.6867e-05
+Epoch 206/300 [11.9s, 128ms/step] loss: 3.7072 (cls: 0.1048, box: 0.6550) | val_mAP50: 98.60% | lr: 5.5814e-05
+Epoch 207/300 [11.8s, 127ms/step] loss: 3.7124 (cls: 0.1036, box: 0.6561) | val_mAP50: 98.61% | lr: 5.4768e-05
+[★ NEW BEST] Val mAP50: 98.61% (Epoch 207)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 208/300 [11.9s, 128ms/step] loss: 3.7058 (cls: 0.1031, box: 0.6550) | val_mAP50: 98.61% | lr: 5.3729e-05
+[★ NEW BEST] Val mAP50: 98.61% (Epoch 208)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 209/300 [11.9s, 128ms/step] loss: 3.7118 (cls: 0.1042, box: 0.6559) | val_mAP50: 98.61% | lr: 5.2698e-05
+[★ NEW BEST] Val mAP50: 98.61% (Epoch 209)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 210/300 [11.9s, 128ms/step] loss: 3.6914 (cls: 0.1025, box: 0.6525) | val_mAP50: 98.61% | lr: 5.1675e-05
+[★ NEW BEST] Val mAP50: 98.61% (Epoch 210)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 211/300 [11.9s, 128ms/step] loss: 3.6985 (cls: 0.1015, box: 0.6540) | val_mAP50: 98.61% | lr: 5.0659e-05
+Epoch 212/300 [11.9s, 128ms/step] loss: 3.6983 (cls: 0.1014, box: 0.6540) | val_mAP50: 98.62% | lr: 4.9651e-05
+[★ NEW BEST] Val mAP50: 98.62% (Epoch 212)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 213/300 [11.9s, 128ms/step] loss: 3.6920 (cls: 0.1005, box: 0.6530) | val_mAP50: 98.62% | lr: 4.8651e-05
+[★ NEW BEST] Val mAP50: 98.62% (Epoch 213)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.5% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 214/300 [12.0s, 129ms/step] loss: 3.6971 (cls: 0.1026, box: 0.6535) | val_mAP50: 98.63% | lr: 4.7659e-05
+[★ NEW BEST] Val mAP50: 98.63% (Epoch 214)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.4%
+Epoch 215/300 [11.9s, 128ms/step] loss: 3.6773 (cls: 0.1016, box: 0.6501) | val_mAP50: 98.63% | lr: 4.6675e-05
+[★ NEW BEST] Val mAP50: 98.63% (Epoch 215)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 216/300 [11.9s, 128ms/step] loss: 3.6945 (cls: 0.1005, box: 0.6535) | val_mAP50: 98.63% | lr: 4.5700e-05
+[★ NEW BEST] Val mAP50: 98.63% (Epoch 216)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 217/300 [11.9s, 128ms/step] loss: 3.6908 (cls: 0.1018, box: 0.6525) | val_mAP50: 98.63% | lr: 4.4732e-05
+[★ NEW BEST] Val mAP50: 98.63% (Epoch 217)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 218/300 [11.9s, 128ms/step] loss: 3.6816 (cls: 0.0998, box: 0.6512) | val_mAP50: 98.63% | lr: 4.3774e-05
+[★ NEW BEST] Val mAP50: 98.63% (Epoch 218)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 219/300 [11.8s, 127ms/step] loss: 3.6814 (cls: 0.1009, box: 0.6510) | val_mAP50: 98.64% | lr: 4.2823e-05
+[★ NEW BEST] Val mAP50: 98.64% (Epoch 219)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 220/300 [11.8s, 127ms/step] loss: 3.6816 (cls: 0.1005, box: 0.6511) | val_mAP50: 98.64% | lr: 4.1882e-05
+[★ NEW BEST] Val mAP50: 98.64% (Epoch 220)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 221/300 [11.8s, 127ms/step] loss: 3.6900 (cls: 0.1020, box: 0.6524) | val_mAP50: 98.63% | lr: 4.0949e-05
+Epoch 222/300 [11.8s, 127ms/step] loss: 3.6692 (cls: 0.1007, box: 0.6488) | val_mAP50: 98.64% | lr: 4.0026e-05
+[★ NEW BEST] Val mAP50: 98.64% (Epoch 222)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 223/300 [11.9s, 128ms/step] loss: 3.6821 (cls: 0.0996, box: 0.6514) | val_mAP50: 98.64% | lr: 3.9111e-05
+Epoch 224/300 [12.0s, 129ms/step] loss: 3.6696 (cls: 0.1018, box: 0.6487) | val_mAP50: 98.64% | lr: 3.8205e-05
+[★ NEW BEST] Val mAP50: 98.64% (Epoch 224)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.1% | toy_car: 98.5%
+Epoch 225/300 [11.9s, 128ms/step] loss: 3.6783 (cls: 0.1002, box: 0.6506) | val_mAP50: 98.62% | lr: 3.7309e-05
+Epoch 226/300 [11.9s, 128ms/step] loss: 3.6577 (cls: 0.0993, box: 0.6470) | val_mAP50: 98.62% | lr: 3.6421e-05
+Epoch 227/300 [12.0s, 129ms/step] loss: 3.6574 (cls: 0.0990, box: 0.6470) | val_mAP50: 98.62% | lr: 3.5544e-05
+Epoch 228/300 [11.8s, 127ms/step] loss: 3.6664 (cls: 0.0989, box: 0.6486) | val_mAP50: 98.62% | lr: 3.4675e-05
+Epoch 229/300 [11.9s, 128ms/step] loss: 3.6694 (cls: 0.1010, box: 0.6488) | val_mAP50: 98.62% | lr: 3.3817e-05
+Epoch 230/300 [11.9s, 127ms/step] loss: 3.6678 (cls: 0.1001, box: 0.6487) | val_mAP50: 98.62% | lr: 3.2968e-05
+Epoch 231/300 [11.8s, 127ms/step] loss: 3.6673 (cls: 0.0995, box: 0.6487) | val_mAP50: 98.62% | lr: 3.2128e-05
+Epoch 232/300 [12.0s, 129ms/step] loss: 3.6635 (cls: 0.0982, box: 0.6482) | val_mAP50: 98.61% | lr: 3.1299e-05
+Epoch 233/300 [11.8s, 127ms/step] loss: 3.6600 (cls: 0.1009, box: 0.6471) | val_mAP50: 98.61% | lr: 3.0480e-05
+Epoch 234/300 [11.7s, 126ms/step] loss: 3.6576 (cls: 0.1002, box: 0.6468) | val_mAP50: 98.61% | lr: 2.9670e-05
+Epoch 235/300 [11.8s, 127ms/step] loss: 3.6602 (cls: 0.0995, box: 0.6474) | val_mAP50: 98.62% | lr: 2.8871e-05
+Epoch 236/300 [11.8s, 127ms/step] loss: 3.6658 (cls: 0.0982, box: 0.6487) | val_mAP50: 98.63% | lr: 2.8082e-05
+Epoch 237/300 [11.7s, 126ms/step] loss: 3.6593 (cls: 0.0987, box: 0.6474) | val_mAP50: 98.63% | lr: 2.7304e-05
+Epoch 238/300 [11.9s, 128ms/step] loss: 3.6629 (cls: 0.0991, box: 0.6480) | val_mAP50: 98.63% | lr: 2.6536e-05
+Epoch 239/300 [11.8s, 127ms/step] loss: 3.6610 (cls: 0.0985, box: 0.6477) | val_mAP50: 98.63% | lr: 2.5778e-05
+Epoch 240/300 [11.9s, 128ms/step] loss: 3.6536 (cls: 0.0970, box: 0.6467) | val_mAP50: 98.63% | lr: 2.5031e-05
+Epoch 241/300 [11.9s, 128ms/step] loss: 3.6506 (cls: 0.0975, box: 0.6460) | val_mAP50: 98.63% | lr: 2.4294e-05
+Epoch 242/300 [11.9s, 127ms/step] loss: 3.6446 (cls: 0.0969, box: 0.6450) | val_mAP50: 98.63% | lr: 2.3569e-05
+Epoch 243/300 [11.9s, 128ms/step] loss: 3.6527 (cls: 0.0977, box: 0.6464) | val_mAP50: 98.64% | lr: 2.2854e-05
+Epoch 244/300 [11.9s, 128ms/step] loss: 3.6528 (cls: 0.0976, box: 0.6464) | val_mAP50: 98.64% | lr: 2.2150e-05
+Epoch 245/300 [12.0s, 129ms/step] loss: 3.6608 (cls: 0.0982, box: 0.6478) | val_mAP50: 98.65% | lr: 2.1457e-05
+[★ NEW BEST] Val mAP50: 98.65% (Epoch 245)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 246/300 [11.9s, 128ms/step] loss: 3.6484 (cls: 0.0970, box: 0.6457) | val_mAP50: 98.65% | lr: 2.0775e-05
+[★ NEW BEST] Val mAP50: 98.65% (Epoch 246)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 247/300 [11.8s, 127ms/step] loss: 3.6627 (cls: 0.0983, box: 0.6481) | val_mAP50: 98.64% | lr: 2.0104e-05
+Epoch 248/300 [11.9s, 128ms/step] loss: 3.6470 (cls: 0.0986, box: 0.6452) | val_mAP50: 98.65% | lr: 1.9445e-05
+[★ NEW BEST] Val mAP50: 98.65% (Epoch 248)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 249/300 [11.9s, 128ms/step] loss: 3.6562 (cls: 0.0982, box: 0.6469) | val_mAP50: 98.64% | lr: 1.8796e-05
+Epoch 250/300 [12.0s, 129ms/step] loss: 3.6455 (cls: 0.0974, box: 0.6451) | val_mAP50: 98.64% | lr: 1.8159e-05
+Epoch 251/300 [12.0s, 129ms/step] loss: 3.6557 (cls: 0.0982, box: 0.6468) | val_mAP50: 98.64% | lr: 1.7534e-05
+Epoch 252/300 [12.0s, 129ms/step] loss: 3.6495 (cls: 0.0978, box: 0.6458) | val_mAP50: 98.66% | lr: 1.6920e-05
+[★ NEW BEST] Val mAP50: 98.66% (Epoch 252)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.7% | book: 97.6% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 253/300 [11.9s, 128ms/step] loss: 3.6429 (cls: 0.0980, box: 0.6445) | val_mAP50: 98.66% | lr: 1.6318e-05
+[★ NEW BEST] Val mAP50: 98.66% (Epoch 253)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.8% | book: 97.7% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 254/300 [11.8s, 127ms/step] loss: 3.6570 (cls: 0.0981, box: 0.6471) | val_mAP50: 98.66% | lr: 1.5727e-05
+[★ NEW BEST] Val mAP50: 98.66% (Epoch 254)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.8% | book: 97.7% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 255/300 [11.9s, 128ms/step] loss: 3.6423 (cls: 0.0978, box: 0.6445) | val_mAP50: 98.67% | lr: 1.5148e-05
+[★ NEW BEST] Val mAP50: 98.67% (Epoch 255)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.8% | book: 97.7% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 256/300 [11.8s, 127ms/step] loss: 3.6385 (cls: 0.0974, box: 0.6439) | val_mAP50: 98.65% | lr: 1.4580e-05
+Epoch 257/300 [11.9s, 128ms/step] loss: 3.6509 (cls: 0.0988, box: 0.6458) | val_mAP50: 98.68% | lr: 1.4025e-05
+[★ NEW BEST] Val mAP50: 98.68% (Epoch 257)
+    Per-class: bottle: 99.6% | cup: 98.7% | phone: 98.8% | book: 97.8% | mouse: 98.3% | box: 99.2% | toy_car: 98.5%
+Epoch 258/300 [11.9s, 128ms/step] loss: 3.6436 (cls: 0.0992, box: 0.6444) | val_mAP50: 98.67% | lr: 1.3481e-05
+Epoch 259/300 [11.9s, 128ms/step] loss: 3.6413 (cls: 0.0977, box: 0.6443) | val_mAP50: 98.65% | lr: 1.2950e-05
+Epoch 260/300 [12.0s, 129ms/step] loss: 3.6431 (cls: 0.0962, box: 0.6449) | val_mAP50: 98.64% | lr: 1.2430e-05
+Epoch 261/300 [11.8s, 127ms/step] loss: 3.6476 (cls: 0.0970, box: 0.6456) | val_mAP50: 98.64% | lr: 1.1923e-05
+Epoch 262/300 [12.0s, 129ms/step] loss: 3.6427 (cls: 0.0969, box: 0.6447) | val_mAP50: 98.67% | lr: 1.1427e-05
+Epoch 263/300 [11.8s, 127ms/step] loss: 3.6328 (cls: 0.0979, box: 0.6427) | val_mAP50: 98.64% | lr: 1.0944e-05
+Epoch 264/300 [11.8s, 127ms/step] loss: 3.6435 (cls: 0.0971, box: 0.6448) | val_mAP50: 98.66% | lr: 1.0473e-05
+Epoch 265/300 [12.0s, 130ms/step] loss: 3.6350 (cls: 0.0959, box: 0.6435) | val_mAP50: 98.64% | lr: 1.0014e-05
+Epoch 266/300 [11.8s, 127ms/step] loss: 3.6413 (cls: 0.0967, box: 0.6445) | val_mAP50: 98.64% | lr: 9.5676e-06
+Epoch 267/300 [11.9s, 128ms/step] loss: 3.6471 (cls: 0.0976, box: 0.6454) | val_mAP50: 98.65% | lr: 9.1336e-06
+Epoch 268/300 [11.9s, 128ms/step] loss: 3.6455 (cls: 0.0973, box: 0.6451) | val_mAP50: 98.66% | lr: 8.7120e-06
+Epoch 269/300 [11.7s, 126ms/step] loss: 3.6428 (cls: 0.0967, box: 0.6448) | val_mAP50: 98.66% | lr: 8.3029e-06
+Epoch 270/300 [12.0s, 129ms/step] loss: 3.6378 (cls: 0.0971, box: 0.6438) | val_mAP50: 98.66% | lr: 7.9063e-06
+Epoch 271/300 [11.6s, 125ms/step] loss: 3.6429 (cls: 0.0960, box: 0.6449) | val_mAP50: 98.65% | lr: 7.5222e-06
+Epoch 272/300 [12.0s, 129ms/step] loss: 3.6461 (cls: 0.0975, box: 0.6452) | val_mAP50: 98.65% | lr: 7.1508e-06
+Epoch 273/300 [11.8s, 127ms/step] loss: 3.6479 (cls: 0.0979, box: 0.6455) | val_mAP50: 98.68% | lr: 6.7920e-06
+Epoch 274/300 [11.7s, 126ms/step] loss: 3.6374 (cls: 0.0965, box: 0.6438) | val_mAP50: 98.67% | lr: 6.4460e-06
+Epoch 275/300 [11.8s, 127ms/step] loss: 3.6469 (cls: 0.0968, box: 0.6455) | val_mAP50: 98.67% | lr: 6.1126e-06
+Epoch 276/300 [11.7s, 126ms/step] loss: 3.6396 (cls: 0.0977, box: 0.6440) | val_mAP50: 98.67% | lr: 5.7921e-06
+Epoch 277/300 [11.9s, 128ms/step] loss: 3.6445 (cls: 0.0969, box: 0.6450) | val_mAP50: 98.67% | lr: 5.4843e-06
+Epoch 278/300 [11.8s, 126ms/step] loss: 3.6434 (cls: 0.0970, box: 0.6448) | val_mAP50: 98.67% | lr: 5.1894e-06
+Epoch 279/300 [11.8s, 127ms/step] loss: 3.6334 (cls: 0.0980, box: 0.6428) | val_mAP50: 98.67% | lr: 4.9073e-06
+Epoch 280/300 [11.7s, 126ms/step] loss: 3.6336 (cls: 0.0969, box: 0.6430) | val_mAP50: 98.67% | lr: 4.6382e-06
+Epoch 281/300 [11.8s, 127ms/step] loss: 3.6287 (cls: 0.0955, box: 0.6424) | val_mAP50: 98.67% | lr: 4.3819e-06
+Epoch 282/300 [11.9s, 128ms/step] loss: 3.6221 (cls: 0.0977, box: 0.6408) | val_mAP50: 98.67% | lr: 4.1387e-06
+Epoch 283/300 [11.8s, 127ms/step] loss: 3.6367 (cls: 0.0971, box: 0.6436) | val_mAP50: 98.67% | lr: 3.9084e-06
+Epoch 284/300 [11.7s, 125ms/step] loss: 3.6322 (cls: 0.0967, box: 0.6428) | val_mAP50: 98.65% | lr: 3.6911e-06
+Epoch 285/300 [11.7s, 126ms/step] loss: 3.6413 (cls: 0.0952, box: 0.6448) | val_mAP50: 98.67% | lr: 3.4869e-06
+Epoch 286/300 [11.8s, 127ms/step] loss: 3.6368 (cls: 0.0982, box: 0.6434) | val_mAP50: 98.66% | lr: 3.2957e-06
+Epoch 287/300 [11.8s, 127ms/step] loss: 3.6510 (cls: 0.0981, box: 0.6460) | val_mAP50: 98.67% | lr: 3.1177e-06
+Epoch 288/300 [11.7s, 125ms/step] loss: 3.6430 (cls: 0.0975, box: 0.6446) | val_mAP50: 98.66% | lr: 2.9527e-06
+Epoch 289/300 [11.7s, 126ms/step] loss: 3.6456 (cls: 0.0984, box: 0.6449) | val_mAP50: 98.67% | lr: 2.8008e-06
+Epoch 290/300 [11.8s, 127ms/step] loss: 3.6350 (cls: 0.0963, box: 0.6434) | val_mAP50: 98.68% | lr: 2.6621e-06
+Epoch 291/300 [11.8s, 127ms/step] loss: 3.6469 (cls: 0.0975, box: 0.6453) | val_mAP50: 98.66% | lr: 2.5365e-06
+Epoch 292/300 [11.9s, 128ms/step] loss: 3.6477 (cls: 0.0971, box: 0.6456) | val_mAP50: 98.68% | lr: 2.4241e-06
+Epoch 293/300 [11.7s, 125ms/step] loss: 3.6416 (cls: 0.0961, box: 0.6446) | val_mAP50: 98.66% | lr: 2.3249e-06
+Epoch 294/300 [11.8s, 127ms/step] loss: 3.6393 (cls: 0.0973, box: 0.6440) | val_mAP50: 98.66% | lr: 2.2388e-06
+Epoch 295/300 [11.8s, 127ms/step] loss: 3.6427 (cls: 0.0967, box: 0.6447) | val_mAP50: 98.68% | lr: 2.1660e-06
+Epoch 296/300 [11.7s, 126ms/step] loss: 3.6431 (cls: 0.0968, box: 0.6448) | val_mAP50: 98.68% | lr: 2.1064e-06
+Epoch 297/300 [11.7s, 126ms/step] loss: 3.6330 (cls: 0.0972, box: 0.6429) | val_mAP50: 98.68% | lr: 2.0599e-06
+Epoch 298/300 [11.8s, 127ms/step] loss: 3.6425 (cls: 0.0975, box: 0.6445) | val_mAP50: 98.68% | lr: 2.0267e-06
+Epoch 299/300 [11.7s, 126ms/step] loss: 3.6442 (cls: 0.0964, box: 0.6451) | val_mAP50: 98.68% | lr: 2.0068e-06
+Epoch 300/300 [11.8s, 127ms/step] loss: 3.6341 (cls: 0.0969, box: 0.6431) | val_mAP50: 98.68% | lr: 2.0000e-06
+
+[✔] Full-6K TAL+NWD Training completed in 19.8 minutes. Best mAP50: 98.68% at Epoch 257.
+[✔] Best checkpoint saved to: /home/dutai/EAI-2026/qualifiers/weights/dtnet_nwd_tal_full6k/best_dtnet_nwd_tal_full6k.pt
