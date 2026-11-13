@@ -85,6 +85,7 @@ qualifiers/runs/
 *.log
 qualifiers/candidate_submissions/*.log
 qualifiers/notes/*.log
+!qualifiers/weights/*/train.log
 
 # Submissions & Large CSV Dumps (Avoid committing 400MB+ of candidate CSVs)
 *.tmp
