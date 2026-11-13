@@ -45,6 +45,9 @@ venv.bak/
 # Preserve lightweight baseline models already tracked
 !qualifiers/weights/mobilenet_bbox_160/best_weights.keras
 !qualifiers/weights/text_cnn.keras
+!qualifiers/weights/text_cnn_int8.tflite
+!qualifiers/weights/dtnet_clean_p2_200ep/*.tflite
+!qualifiers/weights/dtnet_nwd_tal_full6k/*.tflite
 
 # Whitelist reproduction package weights for BTC verification (<1.2MB total)
 !reproduce/weights/*.pt
@@ -90,6 +93,8 @@ qualifiers/notes/*.log
 # Submissions & Large CSV Dumps (Avoid committing 400MB+ of candidate CSVs)
 *.tmp
 qualifiers/candidate_submissions/*.csv
+!qualifiers/candidate_submissions/candidate_clean_200ep_calibrated_14boxes.csv
+!qualifiers/candidate_submissions/candidate_dtnet_nwd_tal_full6k_9915.csv
 qualifiers/submissions/calibrated_*.csv
 qualifiers/submissions/stress_*.csv
 qualifiers/submissions/submission_*.csv
