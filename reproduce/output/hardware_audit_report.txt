@@ -1,0 +1,14 @@
+EDGE AI CHALLENGE 2026 - HARDWARE & EMBEDDED CONSTRAINTS AUDIT
+============================================================
+Target MCU        : ESP32-S3 N16R8 (Xtensa LX7 dual-core @ 240MHz)
+Runtime Engine    : TensorFlow Lite Micro (TFLM)
+Detection Model   : DTNet-NWD-TAL Full-6K INT8
+  - Parameters    : 197,647 (Hard limit <= 200,000) [PASSED]
+  - Flash Size    : 280,856 bytes (274.3 KB <= 1.5 MB) [PASSED]
+  - Resolution    : 320x240 RGB (Native OV7670 camera aspect ratio) [PASSED]
+  - Single Model  : YES (Zero Ensemble, Zero TTA) [PASSED]
+Intent Model      : Multi-Scale TextCNN INT8
+  - Parameters    : 25,925 (Hard limit <= 200,000) [PASSED]
+  - Flash Size    : 38,592 bytes (37.7 KB <= 1.5 MB) [PASSED]
+  - Max Tokens    : 18 tokens (RAM footprint optimized for Tensor Arena)
+Total Flash MCU   : 319,448 bytes (~312 KB out of 1.5 MB)

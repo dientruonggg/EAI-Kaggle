@@ -1,0 +1,15 @@
+{
+  "best_mAP50": 0.9884587891225655,
+  "optimal_nms_iou": 0.65,
+  "optimal_score_thr": 0.001,
+  "per_class_ap50": {
+    "bottle": 0.9915884328617216,
+    "cup": 0.9925361857186362,
+    "phone": 0.9913361465932173,
+    "book": 0.9747239741684024,
+    "mouse": 0.9838052322079336,
+    "box": 0.9984494083286358,
+    "toy_car": 0.9867721439794113
+  },
+  "tflite_path": "qualifiers/weights/dtnet_nwd_tal_full6k/dtnet_nwd_tal_full6k_int8.tflite"
+}

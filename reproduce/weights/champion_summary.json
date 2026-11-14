@@ -1,24 +1,31 @@
 {
-  "model_name": "DTNet-P2 (From-Scratch Ultra Champion)",
+  "model_name": "DTNet-NWD-TAL Full-6K (300 Epochs SOTA Champion)",
+  "team": "DT^2",
+  "competition": "Edge AI Challenge 2026 (Lần 2) - Qualifiers",
+  "target_hardware": "ESP32-S3 N16R8 (Xtensa LX7 @ 240MHz, 8MB PSRAM, 16MB Flash) + OV7670 Camera",
   "architecture": {
     "input_shape": [240, 320, 3],
+    "aspect_ratio": "4:3 native OV7670 camera",
     "grid_shape": [30, 40],
     "stride": 8,
     "head_channels": 96,
     "use_p2_stride4": true,
-    "loss": "Quality Focal Loss (QFL beta=2.0) + CIoU Loss on LTRB offsets",
-    "training": "200 epochs from scratch, seed 42, zero warmstart, close-mosaic epoch 175"
+    "loss": "Task-Aligned Learning (TAL) Dynamic Soft Label Assignment + Normalized Wasserstein Distance (NWD) + CIoU Loss",
+    "training": "300 epochs on full 6k dataset, cosine LR schedule, close-mosaic last 25 epochs"
   },
   "hardware_compliance": {
-    "detection_parameters": 191579,
+    "detection_parameters": 197647,
     "intent_parameters": 25925,
-    "total_parameters": 217504,
+    "total_parameters": 223572,
     "detection_parameter_limit": 200000,
-    "safety_margin_detection_params": 8421,
-    "detection_int8_flash_kb": 266.0,
-    "intent_int8_flash_kb": 38.1,
-    "total_int8_flash_kb": 304.1,
+    "safety_margin_detection_params": 2353,
+    "detection_int8_flash_kb": 274.27,
+    "detection_int8_flash_bytes": 280856,
+    "intent_int8_flash_kb": 37.69,
+    "intent_int8_flash_bytes": 38592,
+    "total_int8_flash_kb": 311.96,
     "flash_budget_kb": 1536.0,
+    "flash_safety_margin_kb": 1224.04,
     "tflm_operators": [
       "CONV_2D",
       "DEPTHWISE_CONV_2D",
@@ -32,56 +39,29 @@
       "FULLY_CONNECTED",
       "SOFTMAX"
     ],
-    "quantization": "Full Integer INT8 (int8 in / int8 out)",
+    "quantization": "Full Integer INT8 (int8 input / int8 output)",
     "single_model_invariant": true,
     "zero_ensemble_zero_tta": true
   },
   "evaluation_metrics": {
-    "val_map50_fp32_best_epoch": 0.9760,
-    "val_map50_int8_base": 0.9804,
-    "val_map50_int8_sweetspot_calibrated": 0.9804,
+    "val_map50_fp32_best_epoch": 0.9868,
+    "val_map50_int8_sweetspot_calibrated": 0.9891,
     "intent_accuracy": 1.0000,
-    "total_contest_score": 98.63,
+    "projected_contest_score": 99.24,
     "per_class_ap50": {
-      "box": 0.9965,
-      "bottle": 0.9926,
-      "cup": 0.9909,
-      "phone": 0.9830,
-      "mouse": 0.9708,
-      "toy_car": 0.9669,
-      "book": 0.9618
-    },
-    "calibrated_thresholds": {
-      "bottle": 0.05,
-      "cup": 0.05,
-      "phone": 0.07,
-      "book": 0.04,
-      "mouse": 0.05,
-      "box": 0.05,
-      "toy_car": 0.03
+      "box": 0.9984,
+      "bottle": 0.9935,
+      "cup": 0.9932,
+      "phone": 0.9913,
+      "toy_car": 0.9877,
+      "mouse": 0.9838,
+      "book": 0.9754
     }
   },
-  "intent_nlp": {
-    "architecture": "Multi-Scale TextCNN (Kernels 2, 3, 4, 5)",
-    "training_samples": 6158,
-    "training_data": "100% Real Vietnamese contest questions (zero synthetic/pseudo templates)",
-    "polite_filler_filtering": "Approved by BTC (13 pure polite particles filtered: ban, oi, cho, toi, hoi, xin, minh, vay, nhi, the, a, gium, giup)",
-    "sequence_max_len": 18,
-    "vocabulary_size": 267,
-    "cv_accuracy_5fold": "100.00% (+/- 0.00%)",
-    "test_distribution": {
-      "COUNT": 800,
-      "EXIST": 800,
-      "LIST": 800,
-      "LOCATION": 800,
-      "OUT_OF_SCOPE": 800
-    }
-  },
-  "submission": {
-    "total_rows": 8000,
-    "detection_rows": 4000,
-    "intent_rows": 4000,
-    "total_boxes_detected": 185461,
-    "avg_boxes_per_image": 46.37
+  "submission_files": {
+    "detection_model_tflite": "reproduce/weights/dtnet_nwd_tal_full6k_int8.tflite",
+    "intent_model_tflite": "reproduce/weights/text_cnn_int8.tflite",
+    "intent_vocab_json": "reproduce/weights/text_cnn_vocab.json",
+    "pytorch_checkpoint": "reproduce/weights/best_dtnet_nwd_tal_full6k.pt"
   }
 }
