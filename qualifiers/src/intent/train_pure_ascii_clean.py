@@ -81,22 +81,6 @@ def clean_text_to_ascii(text: str) -> str:
     return t
 
 
-def is_category_level_query(norm_text: str) -> bool:
-    """
-    Checks if the question is asking generally about categories or object types,
-    e.g. 'bao nhieu loai doi tuong', 'bao nhieu nhom mon do'.
-    These are legitimate COUNT/LIST queries and do not mention a single object class.
-    """
-    return bool(re.search(r'\b(loai|nhom|kieu)\b', norm_text))
-
-
-def has_target_entity(norm_text: str) -> bool:
-    """
-    Checks if normalized text contains any of the 7 canonical competition target objects.
-    """
-    return bool(re.search(r'\b(chai|coc|dien thoai|sach|chuot|hop|xe do choi)\b', norm_text))
-
-
 def encode_query_to_ascii_ids(text: str, max_len: int = MAX_CHAR_LEN) -> np.ndarray:
     """
     Encodes text into a sequence of fixed ASCII integer IDs (0..127).
@@ -294,13 +278,9 @@ def main():
         interp.invoke()
         pred_idx = int(np.argmax(interp.get_tensor(out_idx)[0]))
         pred_intent = INTENT_MAP[pred_idx]
-        norm_q = clean_text_to_ascii(val_texts[i])
-        if pred_intent in ("COUNT", "EXIST", "LOCATION"):
-            if not has_target_entity(norm_q) and not is_category_level_query(norm_q):
-                pred_intent = "OUT_OF_SCOPE"
         if LABEL_MAP[pred_intent] == val_labels[i]:
             int8_corr += 1
-    print(f"[✔] INT8 TFLite Validation Accuracy (with Entity Gate): {int8_corr}/{len(X_val)} ({int8_corr/len(X_val)*100:.2f}%)")
+    print(f"[✔] INT8 TFLite Validation Accuracy (100% Pure TextCNN): {int8_corr}/{len(X_val)} ({int8_corr/len(X_val)*100:.2f}%)")
 
     # 6. Predict 4,000 Test Questions
     test_csv = os.path.abspath(args.test_csv)
@@ -319,15 +299,6 @@ def main():
             interp.invoke()
             pred_idx = int(np.argmax(interp.get_tensor(out_idx)[0]))
             pred_intent = INTENT_MAP[pred_idx]
-
-            # Dictionary Target Entity Gate:
-            # Questions asking COUNT, EXIST, LOCATION on non-target objects are by definition OUT_OF_SCOPE
-            # General category questions ('bao nhieu loai/nhom') remain valid COUNT/LIST.
-            norm_q = clean_text_to_ascii(test_texts[i])
-            if pred_intent in ("COUNT", "EXIST", "LOCATION"):
-                if not has_target_entity(norm_q) and not is_category_level_query(norm_q):
-                    pred_intent = "OUT_OF_SCOPE"
-
             predictions.append(pred_intent)
 
         # Write predictions
