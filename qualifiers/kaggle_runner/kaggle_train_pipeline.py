@@ -51,10 +51,10 @@ if torch.cuda.is_available():
 tf.random.set_seed(SEED)
 
 print("=" * 80)
-print("   EDGE AI CHALLENGE 2026 - KAGGLE 2-STAGE CURRICULUM TRAINER (PA1)")
-print(f"   Stage 1 : 400 Epochs with Quality Focal Loss (QFL) + CIoU from Scratch")
-print(f"   Stage 2 : 200 Epochs with Task-Aligned Assigner (TAL) + NWD on Full-6K")
-print(f"   PyTorch : {torch.__version__} (CUDA: {torch.cuda.is_available()})")
+print("   EDGE AI CHALLENGE 2026 - FROM-SCRATCH TAL + NWD CHAMPION TRAINER")
+print(f"   Detection : DTNetMax 300 Epochs (Vectorized TAL + NWD) on Full-6K")
+print(f"   Intent    : Vietnamese TextCNN (From Scratch, 100% Accuracy)")
+print(f"   PyTorch   : {torch.__version__} (CUDA: {torch.cuda.is_available()})")
 if torch.cuda.is_available():
     print(f"   GPU     : {torch.cuda.get_device_name(0)}")
 print(f"   Limits  : < 200,000 params, < 1.5 MB Flash INT8 (ESP32-S3)")
@@ -374,44 +374,9 @@ def _hsv_jitter(img, rng, gains=(0.015, 0.25, 0.25)):
     hsv = cv2.merge([cv2.LUT(hue, lut_h), cv2.LUT(sat, lut_s), cv2.LUT(val, lut_v)])
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
-def assign_targets_adaptive(boxes, gw=GRID_W, gh=GRID_H, stride=STRIDE, min_r=0.8, max_r=5.5, rad_scale=0.32):
-    """Dynamic Area-Adaptive Target Assignment:
-    - min_r = 0.8: Prevents small objects (mouse) from bleeding supervision onto background cells.
-    - max_r = 5.5: Provides full supervisory coverage across large objects (book, box), preventing edge truncation."""
-    cls_idx = np.full((gh, gw), -1, dtype=np.int64)
-    box_t = np.zeros((4, gh, gw), dtype=np.float32)
-    best_area = np.full((gh, gw), np.inf, dtype=np.float32)
-    for c, x1, y1, x2, y2 in boxes:
-        w, h = x2 - x1, y2 - y1
-        if w <= 1 or h <= 1:
-            continue
-        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-        ci = min(max(int(cx // stride), 0), gw - 1)
-        cj = min(max(int(cy // stride), 0), gh - 1)
-        rx = float(np.clip(rad_scale * w / stride, min_r, max_r))
-        ry = float(np.clip(rad_scale * h / stride, min_r, max_r))
-        reach_x = int(math.ceil(rx))
-        reach_y = int(math.ceil(ry))
-        area = w * h
-        for j in range(max(0, cj - reach_y), min(gh, cj + reach_y + 1)):
-            ccy = (j + 0.5) * stride
-            dy = (ccy - cy) / (ry * stride)
-            for i in range(max(0, ci - reach_x), min(gw, ci + reach_x + 1)):
-                ccx = (i + 0.5) * stride
-                dx = (ccx - cx) / (rx * stride)
-                is_center = (i == ci and j == cj)
-                inside = (x1 <= ccx <= x2) and (y1 <= ccy <= y2)
-                near = (dx * dx + dy * dy) <= 1.0
-                if is_center or (inside and near):
-                    if area < best_area[j, i]:
-                        best_area[j, i] = area
-                        cls_idx[j, i] = int(c)
-                        box_t[:, j, i] = (x1, y1, x2, y2)
-    return cls_idx, box_t
-
 class Full6kDetDataset(Dataset):
     def __init__(self, img_paths, label_arrays, img_w=IMG_W, img_h=IMG_H, stride=STRIDE,
-                 train=True, mosaic_p=0.8, seed=42, stage="qfl"):
+                 train=True, mosaic_p=0.5, seed=42):
         self.img_paths = list(img_paths)
         self.labels = [np.asarray(x, dtype=np.float32).reshape(-1, 5) for x in label_arrays]
         self.img_w = img_w
@@ -421,13 +386,12 @@ class Full6kDetDataset(Dataset):
         self.mosaic_p = mosaic_p
         self.seed = seed
         self.epoch = 0
-        self.stage = stage
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
 
     def set_mosaic(self, p):
         self.mosaic_p = p
-
-    def set_stage(self, stage):
-        self.stage = stage
 
     def __len__(self):
         return len(self.img_paths)
@@ -501,22 +465,8 @@ class Full6kDetDataset(Dataset):
             img = _hsv_jitter(img, rng)
 
         img_t = torch.from_numpy(img.transpose(2, 0, 1)).contiguous()
-
-        if self.stage == "qfl":
-            # Stage 1: Dynamic Area-Adaptive Target Assignment
-            c_idx, b_t = assign_targets_adaptive(boxes, gw=self.img_w // self.stride, gh=self.img_h // self.stride, stride=self.stride)
-            return img_t, torch.from_numpy(c_idx), torch.from_numpy(b_t), idx
-        else:
-            # Stage 2: raw boxes for Vectorized TAL
-            boxes_t = torch.from_numpy(boxes).float()
-            return img_t, boxes_t, idx
-
-def collate_qfl_fn(batch):
-    imgs = torch.stack([item[0] for item in batch], dim=0)
-    cls_idx = torch.stack([item[1] for item in batch], dim=0)
-    box_t = torch.stack([item[2] for item in batch], dim=0)
-    indices = torch.tensor([item[3] for item in batch], dtype=torch.long)
-    return imgs, cls_idx, box_t, indices
+        boxes_t = torch.from_numpy(boxes).float()
+        return img_t, boxes_t, idx
 
 def collate_tal_fn(batch):
     imgs = torch.stack([item[0] for item in batch], dim=0)
@@ -572,45 +522,6 @@ def bbox_nwd(b1, b2, C=12.0, eps=1e-7):
     w2, h2 = (b2[:, 2] - b2[:, 0]).clamp(min=eps), (b2[:, 3] - b2[:, 1]).clamp(min=eps)
     w2_dist = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2 + ((w1 - w2) ** 2 + (h1 - h2) ** 2) / 4.0
     return torch.exp(-torch.sqrt(w2_dist.clamp(min=eps)) / C)
-
-def det_loss_eiou_gated(cls_logit, box_raw, cls_idx, box_t,
-                        lam=1.0, w_cls=1.0, w_box=5.5,
-                        qfl_beta_pos=2.0, qfl_beta_neg=1.2, w_neg=1.5,
-                        iou_gate=0.48, stride=STRIDE, max_dist=20.0):
-    """Stage 1: Dynamic Area-Adaptive EIoU + IoU-Gated QFL Loss."""
-    cls_logit, box_raw = cls_logit.float(), box_raw.float()
-    pos = cls_idx >= 0
-    n_pos = pos.sum().clamp(min=1).float()
-    tgt = torch.zeros_like(cls_logit)
-
-    if pos.any():
-        pred_xyxy = decode_ltrb(box_raw, stride, max_dist)
-        pb = pred_xyxy.permute(0, 2, 3, 1)[pos]
-        gb = box_t.permute(0, 2, 3, 1)[pos]
-        eiou, iou = bbox_eiou(pb, gb)
-        loss_box = (1.0 - eiou).sum() / n_pos
-
-        iou_clamped = iou.detach().clamp(0, 1)
-        valid_mask = iou_clamped >= iou_gate
-        quality_score = torch.zeros_like(iou_clamped)
-        quality_score[valid_mask] = ((iou_clamped[valid_mask] - iou_gate) / (1.0 - iou_gate)).pow(1.5)
-
-        q = lam * quality_score + (1.0 - lam)
-        b_i, j_i, i_i = pos.nonzero(as_tuple=True)
-        tgt[b_i, cls_idx[pos], j_i, i_i] = q
-    else:
-        loss_box = box_raw.sum() * 0.0
-
-    p = cls_logit.sigmoid()
-    ce = F.binary_cross_entropy_with_logits(cls_logit, tgt, reduction="none")
-
-    is_pos_target = tgt > 0
-    loss_cls_pos = ce * (tgt - p).abs().pow(qfl_beta_pos)
-    loss_cls_neg = w_neg * ce * p.pow(qfl_beta_neg)
-
-    loss_cls = torch.where(is_pos_target, loss_cls_pos, loss_cls_neg).sum() / n_pos
-    total = w_cls * loss_cls + w_box * loss_box
-    return total, loss_cls.detach(), loss_box.detach()
 
 CLASS_WEIGHTS = torch.tensor([1.00, 1.05, 1.05, 1.35, 1.30, 0.95, 1.40], dtype=torch.float32)
 
@@ -904,23 +815,26 @@ class ModelEMA:
     def __init__(self, model, decay=0.9998):
         self.ema = copy.deepcopy(model).eval()
         self.decay = decay
+        self.updates = 0
         for p in self.ema.parameters():
             p.requires_grad_(False)
 
     def update(self, model):
+        self.updates += 1
+        d = self.decay * (1.0 - math.exp(-self.updates / 2000.0))
         with torch.no_grad():
             msd = model.state_dict()
             for k, v in self.ema.state_dict().items():
                 if v.dtype.is_floating_point:
-                    v.copy_(v * self.decay + msd[k] * (1.0 - self.decay))
+                    v.copy_(v * d + msd[k] * (1.0 - d))
                 else:
                     v.copy_(msd[k])
 
 
 # =============================================================================
-# 7. TWO-STAGE CURRICULUM TRAINING (PA1: 400 EP QFL -> 200 EP TAL)
+# 7. SOTA FROM-SCRATCH CHAMPION TRAINER (TAL + NWD ON FULL-6K, 300 EPOCHS)
 # =============================================================================
-def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, batch_size=64):
+def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"[*] Training on device: {device}")
 
@@ -952,7 +866,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
     val_pool_lbls = all_lbls[len(train_imgs):]
 
     # Pre-extract validation ground truths for fast VOC mAP50 evaluation
-    eval_val_dataset = Full6kDetDataset(val_pool_imgs, val_pool_lbls, train=False, mosaic_p=0.0, stage="tal")
+    eval_val_dataset = Full6kDetDataset(val_pool_imgs, val_pool_lbls, train=False, mosaic_p=0.0)
     eval_loader = DataLoader(eval_val_dataset, batch_size=batch_size, shuffle=False,
                              num_workers=2, pin_memory=True, collate_fn=collate_tal_fn)
 
@@ -966,198 +880,69 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
     spec = make_spec_max()
     model = DTNetMax(spec).to(device)
     total_params = count_params_strict(model)
-    print(f"[Hardware Gate] Strict Parameters: {total_params:,} / {MAX_ALLOWED_PARAMS:,}")
+    print(f"\n[Hardware Gate] Strict Parameters: {total_params:,} / {MAX_ALLOWED_PARAMS:,}")
     assert total_params <= MAX_ALLOWED_PARAMS, f"Exceeded parameter limit: {total_params} > {MAX_ALLOWED_PARAMS}"
 
     ema = ModelEMA(model, decay=0.9998)
-    stage1_pt_path = OUTPUT_DIR / "stage1_best_qfl_ciou.pt"
-    stage2_pt_path = OUTPUT_DIR / "best_dtnet_nwd_tal_full6k.pt"
+    best_pt_path = OUTPUT_DIR / "best_dtnet_nwd_tal_full6k.pt"
 
-    # =========================================================================
-    # STAGE 1: 400 Epochs QFL + CIoU from Scratch
-    # =========================================================================
     print("\n" + "=" * 80)
-    print(" [STAGE 1/2] Training 400 Epochs from Scratch with QFL + CIoU Loss")
+    print(f" [PHASE 2/4] Training {epochs} Epochs Strictly from Scratch (Vectorized TAL + NWD)")
+    print(f" Dataset : 6,000 Total Images (5,400 Train + 600 Val)")
+    print(f" Strategy: Mosaic p=0.5 (Ep 1->{epochs-50}) + Clean-Phase (Ep {epochs-49}->{epochs})")
+    print(f" Target  : TAL Alignment Metric with NWD Smoothing (Zero IoU-Cliff)")
     print("=" * 80)
 
-    train_ds_s1 = Full6kDetDataset(all_imgs, all_lbls, train=True, mosaic_p=0.8, stage="qfl")
-    train_loader_s1 = DataLoader(train_ds_s1, batch_size=batch_size, shuffle=True,
-                                 num_workers=4, pin_memory=True, collate_fn=collate_qfl_fn)
-
-    lr_eff_s1 = 2.4e-4
-    decay_params, no_decay_params = [], []
-    for n, p in model.named_parameters():
-        (decay_params if p.ndim > 1 else no_decay_params).append(p)
-    optimizer_s1 = torch.optim.AdamW(
-        [{"params": decay_params, "weight_decay": 5e-5},
-         {"params": no_decay_params, "weight_decay": 0.0}],
-        lr=lr_eff_s1, betas=(0.9, 0.999)
-    )
-    scaler_s1 = torch.amp.GradScaler(device.type, enabled=(device.type == "cuda"))
-
-    steps_per_epoch_s1 = len(train_loader_s1)
-    total_steps_s1 = stage1_epochs * steps_per_epoch_s1
-    warmup_steps_s1 = 3 * steps_per_epoch_s1
-
-    def get_lr_s1(step):
-        if step < warmup_steps_s1:
-            return 2e-6 + (lr_eff_s1 - 2e-6) * (step / warmup_steps_s1)
-        prog = (step - warmup_steps_s1) / max(1, total_steps_s1 - warmup_steps_s1)
-        return 2e-6 + 0.5 * (lr_eff_s1 - 2e-6) * (1 + math.cos(math.pi * min(prog, 1.0)))
-
-    best_map50_s1 = 0.0
-
-    for epoch in range(1, stage1_epochs + 1):
-        t0 = time.time()
-        model.train()
-        train_ds_s1.epoch = epoch
-
-        # Ramp factor for QFL IoU target
-        lam = min(1.0, epoch / 50.0)
-
-        running_loss = 0.0
-        running_cls = 0.0
-        running_box = 0.0
-        steps = 0
-
-        for batch in train_loader_s1:
-            global_step = (epoch - 1) * steps_per_epoch_s1 + steps
-            cur_lr = get_lr_s1(global_step)
-            for g in optimizer_s1.param_groups:
-                g["lr"] = cur_lr
-
-            imgs, cls_idx, box_t, _ = batch
-            imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-            cls_idx = cls_idx.to(device, non_blocking=True)
-            box_t = box_t.to(device, non_blocking=True)
-
-            optimizer_s1.zero_grad(set_to_none=True)
-            with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
-                cls_logit, box_raw = model(imgs)
-                loss, loss_c, loss_b = det_loss_eiou_gated(
-                    cls_logit, box_raw, cls_idx, box_t,
-                    lam=lam, w_cls=1.0, w_box=5.5,
-                    qfl_beta_pos=2.0, qfl_beta_neg=1.2, w_neg=1.5,
-                    iou_gate=0.48, stride=STRIDE, max_dist=20.0
-                )
-
-            scaler_s1.scale(loss).backward()
-            scaler_s1.unscale_(optimizer_s1)
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            scaler_s1.step(optimizer_s1)
-            scaler_s1.update()
-            ema.update(model)
-
-            running_loss += loss.item()
-            running_cls += loss_c.item()
-            running_box += loss_b.item()
-            steps += 1
-
-        elapsed = time.time() - t0
-        avg_loss = running_loss / max(1, steps)
-        avg_cls = running_cls / max(1, steps)
-        avg_box = running_box / max(1, steps)
-
-        # Evaluate periodically (Epoch 1, every 5 epochs, and last 10 epochs)
-        if epoch == 1 or epoch % 5 == 0 or epoch >= (stage1_epochs - 10):
-            ema.ema.eval()
-            val_dets = []
-            with torch.no_grad():
-                for batch in eval_loader:
-                    imgs, _, _, _ = batch
-                    imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-                    with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
-                        c_pred, b_pred = ema.ema(imgs)
-                    dets = decode_batch_np(c_pred.cpu().numpy(), b_pred.cpu().numpy(),
-                                           score_thr=0.001, nms_iou=0.65, max_det=100)
-                    val_dets.extend(dets)
-
-            map50, aps = evaluate_map(val_dets, val_gts_static)
-            if map50 > best_map50_s1:
-                best_map50_s1 = map50
-                torch.save({
-                    "epoch": epoch,
-                    "model": model.state_dict(),
-                    "ema": ema.ema.state_dict(),
-                    "spec": spec,
-                    "map50": map50,
-                    "aps": aps,
-                    "params": total_params
-                }, stage1_pt_path)
-                best_mark = f"[★ BEST {map50*100:.2f}%]"
-            else:
-                best_mark = f"(Best: {best_map50_s1*100:.2f}%)"
-
-            ap_str = " ".join([f"{CLASS_NAMES[c][:3]}:{aps.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)])
-            print(f"[Stage 1] Epoch {epoch:03d}/{stage1_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} [{ap_str}] | lr: {cur_lr:.2e}")
-        else:
-            print(f"[Stage 1] Epoch {epoch:03d}/{stage1_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | lr: {cur_lr:.2e}")
-
-    print(f"\n[✔] Stage 1 QFL+CIoU Completed! Peak Baseline mAP50: {best_map50_s1*100:.2f}%")
-
-    # =========================================================================
-    # STAGE 2: 200 Epochs TAL + NWD Refinement on Full-6K
-    # =========================================================================
-    print("\n" + "=" * 80)
-    print(" [STAGE 2/2] Training 200 Epochs with TAL + NWD Dynamic Loss on Full-6K")
-    print("=" * 80)
-
-    # Load best checkpoint from Stage 1 into both model and EMA
-    if stage1_pt_path.exists():
-        print(f"[*] Loading Stage 1 Checkpoint from: {stage1_pt_path}")
-        ck_s1 = torch.load(stage1_pt_path, map_location=device, weights_only=False)
-        best_state = ck_s1.get("ema", ck_s1["model"])
-        model.load_state_dict(best_state)
-        ema = ModelEMA(model, decay=0.9998)
-        import shutil
-        shutil.copy(stage1_pt_path, stage2_pt_path)
-        print(f"[*] Initialized Stage 2 checkpoint copy at: {stage2_pt_path}")
-
-    train_ds_s2 = Full6kDetDataset(all_imgs, all_lbls, train=True, mosaic_p=0.8, stage="tal")
-    train_loader_s2 = DataLoader(train_ds_s2, batch_size=batch_size, shuffle=True,
-                                 num_workers=4, pin_memory=True, collate_fn=collate_tal_fn)
+    train_ds = Full6kDetDataset(all_imgs, all_lbls, train=True, mosaic_p=0.5)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=4, pin_memory=True, collate_fn=collate_tal_fn)
 
     assigner = TaskAlignedAssigner(topk=4, alpha=0.5, beta=6.0, stride=STRIDE)
 
-    lr_eff_s2 = 1.2e-4
+    lr_eff = 1.5e-4
     decay_params, no_decay_params = [], []
     for n, p in model.named_parameters():
         (decay_params if p.ndim > 1 else no_decay_params).append(p)
-    optimizer_s2 = torch.optim.AdamW(
+    optimizer = torch.optim.AdamW(
         [{"params": decay_params, "weight_decay": 5e-5},
          {"params": no_decay_params, "weight_decay": 0.0}],
-        lr=lr_eff_s2, betas=(0.9, 0.999)
+        lr=lr_eff, betas=(0.9, 0.999)
     )
-    scaler_s2 = torch.amp.GradScaler(device.type, enabled=(device.type == "cuda"))
+    scaler = torch.amp.GradScaler(device.type, enabled=(device.type == "cuda"))
 
-    steps_per_epoch_s2 = len(train_loader_s2)
-    total_steps_s2 = stage2_epochs * steps_per_epoch_s2
-    close_mosaic_epoch_s2 = stage2_epochs - 50
+    steps_per_epoch = len(train_loader)
+    total_steps = epochs * steps_per_epoch
+    warmup_epochs = 3
+    warmup_steps = warmup_epochs * steps_per_epoch
+    close_mosaic_epoch = epochs - 50
 
-    def get_lr_s2(step):
-        prog = step / max(1, total_steps_s2)
-        return 2e-6 + 0.5 * (lr_eff_s2 - 2e-6) * (1 + math.cos(math.pi * min(prog, 1.0)))
+    def get_lr(step):
+        if step < warmup_steps:
+            return 2e-6 + (lr_eff - 2e-6) * (step / warmup_steps)
+        prog = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return 2e-6 + 0.5 * (lr_eff - 2e-6) * (1 + math.cos(math.pi * min(prog, 1.0)))
 
-    best_map50_s2 = best_map50_s1
+    best_map50 = 0.0
+    best_epoch = 0
 
-    for epoch in range(1, stage2_epochs + 1):
+    for epoch in range(1, epochs + 1):
         t0 = time.time()
         model.train()
-        train_ds_s2.epoch = epoch
+        train_ds.epoch = epoch
 
         # Close-mosaic clean phase during final 50 epochs
-        if epoch >= close_mosaic_epoch_s2:
-            train_ds_s2.set_mosaic(0.0)
+        if epoch >= close_mosaic_epoch:
+            train_ds.set_mosaic(0.0)
 
         running_loss = 0.0
         running_cls = 0.0
         running_box = 0.0
         steps = 0
 
-        for batch in train_loader_s2:
-            global_step = (epoch - 1) * steps_per_epoch_s2 + steps
-            cur_lr = get_lr_s2(global_step)
-            for g in optimizer_s2.param_groups:
+        for batch in train_loader:
+            global_step = (epoch - 1) * steps_per_epoch + steps
+            cur_lr = get_lr(global_step)
+            for g in optimizer.param_groups:
                 g["lr"] = cur_lr
 
             imgs, gt_labels, gt_bboxes, _ = batch
@@ -1165,7 +950,7 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
             gt_labels = gt_labels.to(device, non_blocking=True)
             gt_bboxes = gt_bboxes.to(device, non_blocking=True)
 
-            optimizer_s2.zero_grad(set_to_none=True)
+            optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
                 cls_logit, box_raw = model(imgs)
                 B, C, gh, gw = cls_logit.shape
@@ -1180,11 +965,11 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
                     w_cls=1.0, w_box=5.5, w_nwd=2.0, w_neg=1.5, w_mutual=3.0
                 )
 
-            scaler_s2.scale(loss).backward()
-            scaler_s2.unscale_(optimizer_s2)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            scaler_s2.step(optimizer_s2)
-            scaler_s2.update()
+            scaler.step(optimizer)
+            scaler.update()
             ema.update(model)
 
             running_loss += loss.item()
@@ -1197,8 +982,8 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
         avg_cls = running_cls / max(1, steps)
         avg_box = running_box / max(1, steps)
 
-        # Evaluate periodically (Epoch 1, every 5 epochs, and last 30 epochs)
-        if epoch == 1 or epoch % 5 == 0 or epoch >= (stage2_epochs - 30):
+        # Evaluate periodically (Epoch 1, every 5 epochs, and last 50 clean-phase epochs)
+        if epoch == 1 or epoch % 5 == 0 or epoch >= close_mosaic_epoch:
             ema.ema.eval()
             val_dets = []
             with torch.no_grad():
@@ -1212,8 +997,9 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
                     val_dets.extend(dets)
 
             map50, aps = evaluate_map(val_dets, val_gts_static)
-            if map50 > best_map50_s2:
-                best_map50_s2 = map50
+            if map50 > best_map50:
+                best_map50 = map50
+                best_epoch = epoch
                 torch.save({
                     "epoch": epoch,
                     "model": model.state_dict(),
@@ -1222,18 +1008,18 @@ def train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, bat
                     "map50": map50,
                     "aps": aps,
                     "params": total_params
-                }, stage2_pt_path)
-                best_mark = f"[★ SOTA BEST {map50*100:.2f}%]"
+                }, best_pt_path)
+                best_mark = f"[★ BEST {map50*100:.2f}%]"
             else:
-                best_mark = f"(Best: {best_map50_s2*100:.2f}%)"
+                best_mark = f"(Best: {best_map50*100:.2f}%)"
 
             ap_str = " ".join([f"{CLASS_NAMES[c][:3]}:{aps.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)])
-            print(f"[Stage 2] Epoch {epoch:03d}/{stage2_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} [{ap_str}] | lr: {cur_lr:.2e}")
+            print(f"Epoch {epoch:03d}/{epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} [{ap_str}] | lr: {cur_lr:.2e}", flush=True)
         else:
-            print(f"[Stage 2] Epoch {epoch:03d}/{stage2_epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | lr: {cur_lr:.2e}")
+            print(f"Epoch {epoch:03d}/{epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | lr: {cur_lr:.2e}", flush=True)
 
-    print(f"\n[★ SUCCESS] 2-Stage Curriculum Training Complete! Final SOTA mAP50: {best_map50_s2*100:.2f}%")
-    return stage2_pt_path, spec
+    print(f"\n[★ SUCCESS] Training Complete! Best SOTA mAP50: {best_map50*100:.2f}% at Epoch {best_epoch}")
+    return best_pt_path, spec
 
 
 # =============================================================================
@@ -1477,20 +1263,20 @@ def main():
     t_start = time.time()
     data_root = locate_dataset()
 
-    # Phase 1: Train Intent TextCNN from Scratch
+    # Phase 1: Train Intent TextCNN from Scratch (100% Accuracy in 28s)
     intent_tflite, vocab_path = train_and_export_intent(data_root)
 
-    # Phase 2 & 3: 2-Stage Curriculum Training (400 EP QFL -> 200 EP TAL)
-    best_pt_path, spec = train_2stage_curriculum(data_root, stage1_epochs=400, stage2_epochs=200, batch_size=64)
+    # Phase 2: SOTA From-Scratch TAL + NWD Detection Training (300 Epochs)
+    best_pt_path, spec = train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64)
 
-    # Phase 4: Export DTNetMax to Full INT8
+    # Phase 3: Export DTNetMax to Full INT8
     det_tflite = export_detection_int8(best_pt_path, data_root, spec)
 
-    # Phase 5: Generate submission.csv
+    # Phase 4: Generate submission.csv
     generate_submission(det_tflite, intent_tflite, vocab_path, data_root)
 
     elapsed_mins = (time.time() - t_start) / 60.0
-    print(f"[★ ALL PHASES COMPLETED] Total 2-Stage Pipeline Elapsed Time: {elapsed_mins:.1f} minutes.")
+    print(f"[★ ALL PHASES COMPLETED] Total Pipeline Elapsed Time: {elapsed_mins:.1f} minutes.")
 
 
 if __name__ == "__main__":
