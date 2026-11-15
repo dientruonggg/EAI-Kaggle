@@ -464,31 +464,48 @@ class Full6kDetDataset(Dataset):
                     boxes[:, 3] = x2
             img = _hsv_jitter(img, rng)
 
-        img_t = torch.from_numpy(img.transpose(2, 0, 1)).contiguous()
-        boxes_t = torch.from_numpy(boxes).float()
-        return img_t, boxes_t, idx
-
-def collate_tal_fn(batch):
-    imgs = torch.stack([item[0] for item in batch], dim=0)
-    boxes_list = [item[1] for item in batch]
-    indices = torch.tensor([item[2] for item in batch], dtype=torch.long)
-
-    max_m = max([len(b) for b in boxes_list] + [1])
-    B = len(batch)
-    gt_labels = torch.full((B, max_m), -1, dtype=torch.long)
-    gt_bboxes = torch.zeros((B, max_m, 4), dtype=torch.float32)
-
-    for b, bx in enumerate(boxes_list):
-        if len(bx) > 0:
-            gt_labels[b, :len(bx)] = bx[:, 0].long()
-            gt_bboxes[b, :len(bx)] = bx[:, 1:5].float()
-
-    return imgs, gt_labels, gt_bboxes, indices
-
+        img_t = torch.from_numpy(np.ascontiguousarray(img.transpose(2, 0, 1)))
+        cls_idx, box_t = assign_targets(boxes, self.img_w // self.stride, self.img_h // self.stride, self.stride)
+        return img_t, torch.from_numpy(cls_idx), torch.from_numpy(box_t), idx
 
 # =============================================================================
-# 5. LOSS FUNCTIONS (Stage 1: QFL+CIoU | Stage 2: TAL+NWD)
+# 5. TARGET ASSIGNMENT & LOSS FUNCTIONS
 # =============================================================================
+def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.5, rad_scale=0.3):
+    """Aspect-ratio aware elliptical center sampling: provides full supervisory
+    coverage across elongated objects (book, toy_car, mouse), eliminating boundary near-misses."""
+    cls_idx = np.full((gh, gw), -1, dtype=np.int64)
+    box_t = np.zeros((4, gh, gw), dtype=np.float32)
+    best_area = np.full((gh, gw), np.inf, dtype=np.float32)
+    for c, x1, y1, x2, y2 in boxes:
+        w, h = x2 - x1, y2 - y1
+        if w <= 1 or h <= 1:
+            continue
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        ci = min(max(int(cx // stride), 0), gw - 1)
+        cj = min(max(int(cy // stride), 0), gh - 1)
+        rx = float(np.clip(rad_scale * w / stride, min_r, max_r))
+        ry = float(np.clip(rad_scale * h / stride, min_r, max_r))
+        reach_x = int(math.ceil(rx))
+        reach_y = int(math.ceil(ry))
+        area = w * h
+        for j in range(max(0, cj - reach_y), min(gh, cj + reach_y + 1)):
+            ccy = (j + 0.5) * stride
+            dy = (ccy - cy) / (ry * stride)
+            for i in range(max(0, ci - reach_x), min(gw, ci + reach_x + 1)):
+                ccx = (i + 0.5) * stride
+                dx = (ccx - cx) / (rx * stride)
+                is_center = (i == ci and j == cj)
+                inside = (x1 <= ccx <= x2) and (y1 <= ccy <= y2)
+                near = (dx * dx + dy * dy) <= 1.0
+                if is_center or (inside and near):
+                    if area < best_area[j, i]:
+                        best_area[j, i] = area
+                        cls_idx[j, i] = int(c)
+                        box_t[:, j, i] = (x1, y1, x2, y2)
+    return cls_idx, box_t
+
+
 def decode_ltrb(box_raw, stride=STRIDE, max_dist=20.0):
     B, _, gh, gw = box_raw.shape
     d = torch.sigmoid(box_raw) * (max_dist * stride)
@@ -496,7 +513,8 @@ def decode_ltrb(box_raw, stride=STRIDE, max_dist=20.0):
     gy = ((torch.arange(gh, device=box_raw.device, dtype=box_raw.dtype) + 0.5) * stride).view(gh, 1)
     return torch.stack([gx - d[:, 0], gy - d[:, 1], gx + d[:, 2], gy + d[:, 3]], 1)
 
-def bbox_eiou(b1, b2, eps=1e-7):
+
+def bbox_ciou(b1, b2, eps=1e-7):
     ix1, iy1 = torch.max(b1[:, 0], b2[:, 0]), torch.max(b1[:, 1], b2[:, 1])
     ix2, iy2 = torch.min(b1[:, 2], b2[:, 2]), torch.min(b1[:, 3], b2[:, 3])
     inter = (ix2 - ix1).clamp(min=0) * (iy2 - iy1).clamp(min=0)
@@ -504,16 +522,15 @@ def bbox_eiou(b1, b2, eps=1e-7):
     w2, h2 = (b2[:, 2] - b2[:, 0]).clamp(min=eps), (b2[:, 3] - b2[:, 1]).clamp(min=eps)
     union = w1 * h1 + w2 * h2 - inter + eps
     iou = inter / union
-    cw = (torch.max(b1[:, 2], b2[:, 2]) - torch.min(b1[:, 0], b2[:, 0])).clamp(min=eps)
-    ch = (torch.max(b1[:, 3], b2[:, 3]) - torch.min(b1[:, 1], b2[:, 1])).clamp(min=eps)
+    cw = torch.max(b1[:, 2], b2[:, 2]) - torch.min(b1[:, 0], b2[:, 0])
+    ch = torch.max(b1[:, 3], b2[:, 3]) - torch.min(b1[:, 1], b2[:, 1])
     c2 = cw ** 2 + ch ** 2 + eps
-    cx1, cy1 = (b1[:, 0] + b1[:, 2]) / 2.0, (b1[:, 1] + b1[:, 3]) / 2.0
-    cx2, cy2 = (b2[:, 0] + b2[:, 2]) / 2.0, (b2[:, 1] + b2[:, 3]) / 2.0
-    rho2 = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2
-    dist_w2 = (w1 - w2) ** 2 / (cw ** 2 + eps)
-    dist_h2 = (h1 - h2) ** 2 / (ch ** 2 + eps)
-    eiou = iou - (rho2 / c2) - dist_w2 - dist_h2
-    return eiou, iou
+    rho2 = ((b1[:, 0] + b1[:, 2] - b2[:, 0] - b2[:, 2]) ** 2 + (b1[:, 1] + b1[:, 3] - b2[:, 1] - b2[:, 3]) ** 2) / 4.0
+    v = (4.0 / math.pi ** 2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)) ** 2
+    with torch.no_grad():
+        alpha = v / (v - iou + (1.0 + eps))
+    return iou - rho2 / c2 - alpha * v, iou
+
 
 def bbox_nwd(b1, b2, C=12.0, eps=1e-7):
     cx1, cy1 = (b1[:, 0] + b1[:, 2]) / 2.0, (b1[:, 1] + b1[:, 3]) / 2.0
@@ -523,187 +540,28 @@ def bbox_nwd(b1, b2, C=12.0, eps=1e-7):
     w2_dist = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2 + ((w1 - w2) ** 2 + (h1 - h2) ** 2) / 4.0
     return torch.exp(-torch.sqrt(w2_dist.clamp(min=eps)) / C)
 
-CLASS_WEIGHTS = torch.tensor([1.00, 1.05, 1.05, 1.35, 1.30, 0.95, 1.40], dtype=torch.float32)
 
-class TaskAlignedAssigner:
-    def __init__(self, topk=4, alpha=0.5, beta=6.0, stride=STRIDE):
-        self.topk = topk
-        self.alpha = alpha
-        self.beta = beta
-        self.stride = stride
-
-    @torch.no_grad()
-    def assign(self, pred_scores, pred_boxes, gt_boxes_or_labels, gh, gw, device=None, gt_bboxes_arg=None):
-        if device is None:
-            device = pred_scores.device
-
-        B = pred_scores.shape[0]
-        C = pred_scores.shape[1] if pred_scores.dim() == 4 else pred_scores.shape[2]
-        A = gh * gw
-
-        if gt_bboxes_arg is not None:
-            gt_labels = gt_boxes_or_labels.to(device)
-            gt_bboxes = gt_bboxes_arg.to(device)
-            max_m = gt_labels.shape[1]
-        elif isinstance(gt_boxes_or_labels, (list, tuple)):
-            max_m = max([len(g) for g in gt_boxes_or_labels] + [1])
-            gt_labels = torch.full((B, max_m), -1, dtype=torch.long, device=device)
-            gt_bboxes = torch.zeros((B, max_m, 4), dtype=torch.float32, device=device)
-            for b, g in enumerate(gt_boxes_or_labels):
-                if len(g) > 0:
-                    gt_labels[b, :len(g)] = g[:, 0].long().to(device)
-                    gt_bboxes[b, :len(g)] = g[:, 1:5].float().to(device)
-        else:
-            gt_labels = gt_boxes_or_labels.long().to(device)
-            gt_bboxes = gt_bboxes_arg.to(device) if gt_bboxes_arg is not None else None
-            max_m = gt_labels.shape[1]
-
-        mask_gt = gt_labels >= 0
-
-        if pred_scores.dim() == 4:
-            ps = pred_scores.permute(0, 2, 3, 1).reshape(B, A, C)
-        else:
-            ps = pred_scores
-
-        if pred_boxes.dim() == 4:
-            pb = pred_boxes.permute(0, 2, 3, 1).reshape(B, 1, A, 4)
-        else:
-            pb = pred_boxes.unsqueeze(1)
-
-        gx = ((torch.arange(gw, device=device, dtype=torch.float32) + 0.5) * self.stride).view(1, gw).expand(gh, gw)
-        gy = ((torch.arange(gh, device=device, dtype=torch.float32) + 0.5) * self.stride).view(gh, 1).expand(gh, gw)
-        ax = gx.reshape(1, 1, A)
-        ay = gy.reshape(1, 1, A)
-
-        x1, y1 = gt_bboxes[:, :, 0:1], gt_bboxes[:, :, 1:2]
-        x2, y2 = gt_bboxes[:, :, 2:3], gt_bboxes[:, :, 3:4]
-        w = (x2 - x1).clamp(min=1.0)
-        h = (y2 - y1).clamp(min=1.0)
-        pad_x = torch.maximum(torch.tensor(self.stride * 0.5, device=device), w * 0.1)
-        pad_y = torch.maximum(torch.tensor(self.stride * 0.5, device=device), h * 0.1)
-
-        in_mask = (ax >= (x1 - pad_x)) & (ax <= (x2 + pad_x)) & \
-                  (ay >= (y1 - pad_y)) & (ay <= (y2 + pad_y)) & mask_gt.unsqueeze(-1)
-
-        has_cand = in_mask.sum(dim=-1, keepdim=True) > 0
-        dist2 = (ax - (x1 + x2) / 2.0)**2 + (ay - (y1 + y2) / 2.0)**2
-        closest = torch.argmin(dist2, dim=-1, keepdim=True)
-        fallback_mask = torch.zeros_like(in_mask).scatter_(-1, closest, True)
-        in_mask = torch.where(has_cand, in_mask, fallback_mask) & mask_gt.unsqueeze(-1)
-
-        gb = gt_bboxes.unsqueeze(2)
-        pw = (pb[..., 2] - pb[..., 0]).clamp(min=1e-6)
-        ph = (pb[..., 3] - pb[..., 1]).clamp(min=1e-6)
-        gw_box = (gb[..., 2] - gb[..., 0]).clamp(min=1e-6)
-        gh_box = (gb[..., 3] - gb[..., 1]).clamp(min=1e-6)
-
-        ix1 = torch.maximum(pb[..., 0], gb[..., 0])
-        iy1 = torch.maximum(pb[..., 1], gb[..., 1])
-        ix2 = torch.minimum(pb[..., 2], gb[..., 2])
-        iy2 = torch.minimum(pb[..., 3], gb[..., 3])
-        inter = (ix2 - ix1).clamp(min=0) * (iy2 - iy1).clamp(min=0)
-        union = pw * ph + gw_box * gh_box - inter + 1e-7
-        ious = inter / union
-
-        cx1, cy1 = (pb[..., 0] + pb[..., 2]) / 2.0, (pb[..., 1] + pb[..., 3]) / 2.0
-        cx2, cy2 = (gb[..., 0] + gb[..., 2]) / 2.0, (gb[..., 1] + gb[..., 3]) / 2.0
-        w2 = (cx1 - cx2)**2 + (cy1 - cy2)**2 + ((pw - gw_box)**2 + (ph - gh_box)**2) / 4.0
-        nwds = torch.exp(-torch.sqrt(w2.clamp(min=1e-7)) / 12.0)
-
-        quality = torch.maximum(ious, nwds).clamp(min=1e-6)
-
-        gt_cls_clamped = gt_labels.clamp(min=0)
-        cls_scores = torch.gather(
-            ps.unsqueeze(1).expand(-1, max_m, -1, -1),
-            dim=-1,
-            index=gt_cls_clamped.view(B, max_m, 1, 1).expand(-1, -1, A, 1)
-        ).squeeze(-1).clamp(min=1e-6)
-
-        align_raw = (cls_scores.pow(self.alpha) * quality.pow(self.beta)).clamp(min=1e-6)
-        align_metric = torch.where(in_mask, align_raw, torch.tensor(-1e9, device=device))
-
-        k = min(self.topk, A)
-        topk_metrics, topk_anchors = torch.topk(align_metric, k=k, dim=-1)
-        is_in_topk = torch.zeros((B, max_m, A), dtype=torch.bool, device=device)
-        is_in_topk.scatter_(dim=-1, index=topk_anchors, src=topk_metrics > 0)
-        is_in_topk = is_in_topk & in_mask & mask_gt.unsqueeze(-1)
-
-        max_val = topk_metrics[:, :, 0:1].clamp(min=1e-6)
-        norm_targets = (align_raw / max_val).clamp(min=0.2, max=1.0) * is_in_topk.float()
-
-        mask_metric = align_raw * is_in_topk.float()
-        best_metric, best_gt_idx = torch.max(mask_metric, dim=1)
-        is_pos = best_metric > 0
-
-        assigned_cls = torch.full((B, A), -1, dtype=torch.long, device=device)
-        assigned_box = torch.zeros((B, A, 4), dtype=torch.float32, device=device)
-        assigned_target = torch.zeros((B, A, C), dtype=torch.float32, device=device)
-
-        if is_pos.any():
-            pos_b, pos_a = torch.where(is_pos)
-            pos_gt = best_gt_idx[pos_b, pos_a]
-            pos_c = gt_labels[pos_b, pos_gt]
-            pos_tgt_val = norm_targets[pos_b, pos_gt, pos_a]
-            pos_box_val = gt_bboxes[pos_b, pos_gt]
-
-            assigned_cls[pos_b, pos_a] = pos_c
-            assigned_box[pos_b, pos_a] = pos_box_val
-            assigned_target[pos_b, pos_a, pos_c] = pos_tgt_val
-
-        assigned_cls = assigned_cls.view(B, gh, gw)
-        assigned_box = assigned_box.permute(0, 2, 1).view(B, 4, gh, gw)
-        assigned_target = assigned_target.permute(0, 2, 1).view(B, C, gh, gw)
-
-        return assigned_cls, assigned_box, assigned_target
-
-def det_loss_tal_nwd(cls_logit, box_raw, assigned_cls, assigned_box, assigned_target,
-                     w_cls=1.0, w_box=5.5, w_nwd=2.0, w_neg=1.5, w_mutual=3.0,
-                     stride=STRIDE, max_dist=20.0):
-    device = cls_logit.device
-    cls_weights = CLASS_WEIGHTS.to(device)
-
+def det_loss(cls_logit, box_raw, cls_idx, box_t, lam=0.6, w_cls=1.0, w_box=4.5, w_nwd=2.0, qfl_beta=2.0, stride=STRIDE, max_dist=20.0):
     cls_logit, box_raw = cls_logit.float(), box_raw.float()
-    B, C, gh, gw = cls_logit.shape
-    pos = assigned_cls >= 0
+    pos = cls_idx >= 0
     n_pos = pos.sum().clamp(min=1).float()
-
+    tgt = torch.zeros_like(cls_logit)
     if pos.any():
         pred_xyxy = decode_ltrb(box_raw, stride, max_dist)
         pb = pred_xyxy.permute(0, 2, 3, 1)[pos]
-        gb = assigned_box.permute(0, 2, 3, 1)[pos]
-        pos_classes = assigned_cls[pos]
-
-        eiou, iou = bbox_eiou(pb, gb)
+        gb = box_t.permute(0, 2, 3, 1)[pos]
+        ciou, iou = bbox_ciou(pb, gb)
         nwd = bbox_nwd(pb, gb)
-
-        gw_box = (gb[:, 2] - gb[:, 0]).clamp(min=1.0)
-        gh_box = (gb[:, 3] - gb[:, 1]).clamp(min=1.0)
-        area_norm = (gw_box * gh_box) / (ORIG_W * ORIG_H)
-        w_scale = 1.0 + 1.2 * (1.0 - torch.sqrt(area_norm)).clamp(0, 1.0)
-
-        w_cls_box = cls_weights[pos_classes]
-        loss_box_per_pos = ((1.0 - eiou) + w_nwd * (1.0 - nwd)) * w_scale * w_cls_box
-        loss_box = loss_box_per_pos.sum() / n_pos
+        loss_box = ((1.0 - ciou) + w_nwd * (1.0 - nwd)).sum() / n_pos
+        quality = torch.maximum(iou.detach(), nwd.detach()).clamp(0, 1)
+        q = lam * quality + (1.0 - lam)
+        b_i, j_i, i_i = pos.nonzero(as_tuple=True)
+        tgt[b_i, cls_idx[pos], j_i, i_i] = q
     else:
         loss_box = box_raw.sum() * 0.0
-
     p = cls_logit.sigmoid()
-    ce = F.binary_cross_entropy_with_logits(cls_logit, assigned_target, reduction="none")
-
-    is_pos_target = assigned_target > 0
-
-    class_indices = torch.arange(C, device=device).view(1, C, 1, 1).expand(B, C, gh, gw)
-    weight_map = cls_weights[class_indices]
-    loss_cls_pos = weight_map * ce * (assigned_target - p).abs().pow(2.0)
-
-    pos_expanded = pos.unsqueeze(1).expand(-1, C, -1, -1)
-    is_mutual = pos_expanded & (~is_pos_target)
-    loss_cls_mutual = w_mutual * ce * p.pow(1.0)
-    loss_cls_bg = w_neg * ce * p.pow(1.2)
-
-    loss_cls_neg = torch.where(is_mutual, loss_cls_mutual, loss_cls_bg)
-    loss_cls = torch.where(is_pos_target, loss_cls_pos, loss_cls_neg).sum() / n_pos
-
+    ce = F.binary_cross_entropy_with_logits(cls_logit, tgt, reduction="none")
+    loss_cls = (ce * (tgt - p).abs().pow(qfl_beta)).sum() / n_pos
     total = w_cls * loss_cls + w_box * loss_box
     return total, loss_cls.detach(), loss_box.detach()
 
@@ -812,27 +670,26 @@ def evaluate_map(dets, gts, num_classes=NUM_CLASSES, iou_thr=0.5):
     return (float(np.mean(list(aps.values()))) if aps else 0.0), aps
 
 class ModelEMA:
-    def __init__(self, model, decay=0.9998):
+    def __init__(self, model, decay=0.9995, tau=2000):
         self.ema = copy.deepcopy(model).eval()
-        self.decay = decay
-        self.updates = 0
         for p in self.ema.parameters():
             p.requires_grad_(False)
+        self.decay, self.tau, self.updates = decay, tau, 0
 
+    @torch.no_grad()
     def update(self, model):
         self.updates += 1
-        d = self.decay * (1.0 - math.exp(-self.updates / 2000.0))
-        with torch.no_grad():
-            msd = model.state_dict()
-            for k, v in self.ema.state_dict().items():
-                if v.dtype.is_floating_point:
-                    v.copy_(v * d + msd[k] * (1.0 - d))
-                else:
-                    v.copy_(msd[k])
+        d = self.decay * (1.0 - math.exp(-self.updates / self.tau))
+        msd = model.state_dict()
+        for k, v in self.ema.state_dict().items():
+            if v.dtype.is_floating_point:
+                v.mul_(d).add_(msd[k].detach(), alpha=1.0 - d)
+            else:
+                v.copy_(msd[k])
 
 
 # =============================================================================
-# 7. SOTA FROM-SCRATCH CHAMPION TRAINER (TAL + NWD ON FULL-6K, 300 EPOCHS)
+# 7. SOTA FROM-SCRATCH CHAMPION TRAINER (ELLIPTICAL SAMPLING + QFL + CIoU/NWD)
 # =============================================================================
 def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -868,7 +725,7 @@ def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
     # Pre-extract validation ground truths for fast VOC mAP50 evaluation
     eval_val_dataset = Full6kDetDataset(val_pool_imgs, val_pool_lbls, train=False, mosaic_p=0.0)
     eval_loader = DataLoader(eval_val_dataset, batch_size=batch_size, shuffle=False,
-                             num_workers=2, pin_memory=True, collate_fn=collate_tal_fn)
+                             num_workers=2, pin_memory=True)
 
     val_gts_static = []
     for b in val_pool_lbls:
@@ -883,28 +740,27 @@ def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
     print(f"\n[Hardware Gate] Strict Parameters: {total_params:,} / {MAX_ALLOWED_PARAMS:,}")
     assert total_params <= MAX_ALLOWED_PARAMS, f"Exceeded parameter limit: {total_params} > {MAX_ALLOWED_PARAMS}"
 
-    ema = ModelEMA(model, decay=0.9998)
+    ema = ModelEMA(model, decay=0.9995)
     best_pt_path = OUTPUT_DIR / "best_dtnet_nwd_tal_full6k.pt"
 
     print("\n" + "=" * 80)
-    print(f" [PHASE 2/4] Training {epochs} Epochs Strictly from Scratch (Vectorized TAL + NWD)")
+    print(f" [PHASE 2/4] Training {epochs} Epochs Strictly from Scratch (SOTA Rocket Launcher)")
     print(f" Dataset : 6,000 Total Images (5,400 Train + 600 Val)")
     print(f" Strategy: Mosaic p=0.5 (Ep 1->{epochs-50}) + Clean-Phase (Ep {epochs-49}->{epochs})")
-    print(f" Target  : TAL Alignment Metric with NWD Smoothing (Zero IoU-Cliff)")
+    print(f" Target  : Elliptical Center-Sampling + QFL + Smooth NWD/CIoU (Base Target 0.4)")
+    print(f" LR Rate : Effective lr=2.0e-3 (Fast SOTA Convergence)")
     print("=" * 80)
 
     train_ds = Full6kDetDataset(all_imgs, all_lbls, train=True, mosaic_p=0.5)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
-                              num_workers=4, pin_memory=True, collate_fn=collate_tal_fn)
+                              num_workers=4, pin_memory=True)
 
-    assigner = TaskAlignedAssigner(topk=4, alpha=0.5, beta=6.0, stride=STRIDE)
-
-    lr_eff = 1.5e-4
+    lr_eff = 2.0e-3
     decay_params, no_decay_params = [], []
     for n, p in model.named_parameters():
         (decay_params if p.ndim > 1 else no_decay_params).append(p)
     optimizer = torch.optim.AdamW(
-        [{"params": decay_params, "weight_decay": 5e-5},
+        [{"params": decay_params, "weight_decay": 0.01},
          {"params": no_decay_params, "weight_decay": 0.0}],
         lr=lr_eff, betas=(0.9, 0.999)
     )
@@ -918,9 +774,9 @@ def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
 
     def get_lr(step):
         if step < warmup_steps:
-            return 2e-6 + (lr_eff - 2e-6) * (step / warmup_steps)
+            return 2e-5 + (lr_eff - 2e-5) * (step / warmup_steps)
         prog = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-        return 2e-6 + 0.5 * (lr_eff - 2e-6) * (1 + math.cos(math.pi * min(prog, 1.0)))
+        return 2e-5 + 0.5 * (lr_eff - 2e-5) * (1 + math.cos(math.pi * min(prog, 1.0)))
 
     best_map50 = 0.0
     best_epoch = 0
@@ -928,7 +784,7 @@ def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
     for epoch in range(1, epochs + 1):
         t0 = time.time()
         model.train()
-        train_ds.epoch = epoch
+        train_ds.set_epoch(epoch)
 
         # Close-mosaic clean phase during final 50 epochs
         if epoch >= close_mosaic_epoch:
@@ -945,24 +801,17 @@ def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
             for g in optimizer.param_groups:
                 g["lr"] = cur_lr
 
-            imgs, gt_labels, gt_bboxes, _ = batch
+            imgs, cls_idx, box_t, _ = batch
             imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-            gt_labels = gt_labels.to(device, non_blocking=True)
-            gt_bboxes = gt_bboxes.to(device, non_blocking=True)
+            cls_idx = cls_idx.to(device, non_blocking=True)
+            box_t = box_t.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
                 cls_logit, box_raw = model(imgs)
-                B, C, gh, gw = cls_logit.shape
-                with torch.no_grad():
-                    pred_xyxy = decode_ltrb(box_raw, STRIDE, 20.0)
-                    pred_scores = cls_logit.sigmoid()
-                    a_cls, a_box, a_tgt = assigner.assign(
-                        pred_scores.float(), pred_xyxy.float(), gt_labels, gh, gw, device, gt_bboxes_arg=gt_bboxes
-                    )
-                loss, loss_c, loss_b = det_loss_tal_nwd(
-                    cls_logit, box_raw, a_cls, a_box, a_tgt,
-                    w_cls=1.0, w_box=5.5, w_nwd=2.0, w_neg=1.5, w_mutual=3.0
+                loss, loss_c, loss_b = det_loss(
+                    cls_logit, box_raw, cls_idx, box_t,
+                    lam=0.6, w_cls=1.0, w_box=4.5, w_nwd=2.0, qfl_beta=2.0
                 )
 
             scaler.scale(loss).backward()
