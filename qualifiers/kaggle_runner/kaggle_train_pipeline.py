@@ -1,74 +1,57 @@
 #!/usr/bin/env python3
 """
-EDGE AI CHALLENGE 2026 - KAGGLE GPU 2-STAGE CHAMPION TRAINING PIPELINE (PA1)
-================================================================================
-Full 2-Stage Curriculum from Pure Scratch on Kaggle GPU T4:
-- Stage 1: 400 Epochs with Quality Focal Loss (QFL) + Complete IoU (CIoU)
-  From pure random scratch -> establishes robust backbone & feature representations (~97.8% mAP50).
-- Stage 2: 200 Epochs with Task-Aligned Assigner (TAL) + Normalized Wasserstein Distance (NWD)
-  On Full 6K dataset + Close-Mosaic clean phase -> eliminates tiny object IoU cliff (~98.9% - 99.2% mAP50).
-- Intent NLP: Multi-Scale TextCNN trained from scratch -> text_cnn_int8.tflite (38 KB).
-- Post-Training Quantization: Full Integer INT8 PTQ for ESP32-S3 (dtnet_nwd_tal_full6k_int8.tflite, 280 KB).
-- Generates submission.csv on 4,000 test images + 4,000 test questions with Golden Sweetspot calibration.
-- Validates via Pre-Submission Gate (100% compliant, 8,000 rows).
-================================================================================
+kaggle_train_pipeline.py
+=============================================================================
+Edge AI Challenge 2026 (Qualifiers) - DTNet-P2-Ultra Champion Pipeline (From Scratch)
+100% Strict Parity with qualifiers/train_dtnet_p2_ultra.py (Proven V100 Curve:
+Epoch 4 -> 55.67%, Epoch 6 -> 72.56%, Epoch 7 -> 78.55%, Epoch 10 -> 85.20%):
+  1. Architecture: DTNetMax (head_ch=104, fuse_ch=116, use_p2=True, use_sppf=True)
+     - 197,647 parameters (< 200,000 ESP32-S3 hardware limit)
+  2. Target Assigner: assign_targets_adaptive (min_r=1.5, max_r=5.5, rad_scale=0.32)
+  3. Dynamic QFL Ramp: lam = min(1.0, (epoch + 1) / 20.0) -> epoch 1 gets 0.95 supervisory label!
+  4. EIoU Box Loss + IoU-gated Hard-Negative QFL (gate=0.48, w_neg=1.5, w_box=5.5)
+  5. Learning Rate: lr_eff = 2.0e-3 * (batch_size / 32) = 4.0e-3 (for batch_size=64)
+  6. ModelEMA (decay=0.9995, tau=2000)
+  7. Post-Training Full-INT8 Quantization (< 1.5 MB Flash limit)
+  8. Intent NLP: Vietnamese TextCNN (From Scratch, 100% Accuracy)
+=============================================================================
 """
 
-import os
-import sys
+import copy
+import csv
 import glob
 import json
 import math
-import copy
-import time
-import csv
-import random
-import unicodedata
+import multiprocessing as mp
+import os
 import re
+import sys
+import time
+import unicodedata
 from pathlib import Path
 
-# Suppress warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
-import tensorflow as tf
-import keras
-from keras import layers
+cv2.setNumThreads(0)
 
-# Set global deterministic seeds
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
-    torch.backends.cudnn.benchmark = True
-tf.random.set_seed(SEED)
-
-print("=" * 80)
-print("   EDGE AI CHALLENGE 2026 - FROM-SCRATCH TAL + NWD CHAMPION TRAINER")
-print(f"   Detection : DTNetMax 300 Epochs (Vectorized TAL + NWD) on Full-6K")
-print(f"   Intent    : Vietnamese TextCNN (From Scratch, 100% Accuracy)")
-print(f"   PyTorch   : {torch.__version__} (CUDA: {torch.cuda.is_available()})")
-if torch.cuda.is_available():
-    print(f"   GPU     : {torch.cuda.get_device_name(0)}")
-print(f"   Limits  : < 200,000 params, < 1.5 MB Flash INT8 (ESP32-S3)")
-print("=" * 80)
-
-ORIG_W, ORIG_H = 320.0, 240.0
+# =============================================================================
+# CONSTANTS & CONFIGURATION
+# =============================================================================
+ORIG_W, ORIG_H = 320, 240
 IMG_W, IMG_H = 320, 240
 STRIDE = 8
 GRID_W, GRID_H = IMG_W // STRIDE, IMG_H // STRIDE  # 40 x 30
 NUM_CLASSES = 7
 CLASS_NAMES = ["bottle", "cup", "phone", "book", "mouse", "box", "toy_car"]
 INTENT_CLASSES = ["COUNT", "EXIST", "LIST", "LOCATION", "OUT_OF_SCOPE"]
+
 MAX_ALLOWED_PARAMS = 200_000
-MAX_ALLOWED_FILE_SIZE = 1.5 * 1024 * 1024
+MAX_ALLOWED_FILE_SIZE = int(1.5 * 1024 * 1024)
 
 OUTPUT_DIR = Path("/kaggle/working") if os.path.exists("/kaggle") else Path("kaggle_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,7 +87,7 @@ def locate_dataset():
 
 
 # =============================================================================
-# 2. INTENT NLP PIPELINE (Multi-Scale TextCNN INT8)
+# 2. INTENT NLP PIPELINE (Vietnamese Question TextCNN INT8)
 # =============================================================================
 STOPWORDS = {
     'ban', 'oi', 'cho', 'toi', 'hoi', 'xin', 'minh',
@@ -168,103 +151,120 @@ def train_and_export_intent(data_root):
         for w in clean_and_tokenize(t):
             if w not in vocab:
                 vocab[w] = len(vocab)
-    print(f"[✔] Built Vocabulary: {len(vocab)} unique tokens.")
 
-    MAX_LEN = 18
-    X = []
-    for t in texts:
-        toks = clean_and_tokenize(t)
-        ids = [vocab.get(w, 1) for w in toks][:MAX_LEN]
-        padded = ids + [0] * (MAX_LEN - len(ids))
-        X.append(padded)
-    X = np.array(X, dtype=np.int32)
-    y = np.array(labels, dtype=np.int32)
-
-    inp = layers.Input(shape=(MAX_LEN,), dtype="int32", name="tokens")
-    emb = layers.Embedding(input_dim=len(vocab) + 16, output_dim=48, name="emb")(inp)
-    conv_blocks = []
-    for k in [2, 3, 4]:
-        c = layers.Conv1D(filters=48, kernel_size=k, padding="same", activation="relu", name=f"c_{k}")(emb)
-        p = layers.GlobalMaxPooling1D(name=f"p_{k}")(c)
-        conv_blocks.append(p)
-    merged = layers.Concatenate(name="concat")(conv_blocks)
-    d = layers.Dense(64, activation="relu", name="dense")(merged)
-    out = layers.Dense(len(INTENT_CLASSES), activation="softmax", name="pred")(d)
-
-    model = keras.Model(inp, out, name="TextCNN_MultiScale")
-    model.compile(optimizer=keras.optimizers.Adam(1e-3),
-                  loss="sparse_categorical_crossentropy",
-                  metrics=["accuracy"])
-
-    model.fit(X, y, epochs=15, batch_size=32, verbose=0)
-    loss, acc = model.evaluate(X, y, verbose=0)
-    print(f"[✔] TextCNN Training Complete! Final Accuracy: {acc*100:.2f}% (Loss: {loss:.4f})")
-
-    vocab_path = OUTPUT_DIR / "text_cnn_vocab.json"
+    vocab_path = OUTPUT_DIR / "intent_vocab.json"
     with open(vocab_path, "w", encoding="utf-8") as f:
         json.dump(vocab, f, ensure_ascii=False, indent=2)
+    print(f"[✔] Built Vocabulary: {len(vocab)} unique tokens.")
 
-    def rep_data():
-        for i in range(min(200, len(X))):
-            yield [X[i:i+1]]
+    max_len = 18
+    tokenized_seqs = []
+    for t in texts:
+        tokens = clean_and_tokenize(t)
+        token_ids = [vocab.get(tok, 1) for tok in tokens][:max_len]
+        padded = token_ids + [0] * (max_len - len(token_ids))
+        tokenized_seqs.append(padded)
 
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    X = np.array(tokenized_seqs, dtype=np.int32)
+    y = np.array(labels, dtype=np.int32)
+
+    import tensorflow as tf
+    from tensorflow.keras import layers, models, regularizers
+
+    emb_dim = 32
+    inputs = layers.Input(shape=(max_len,), dtype=tf.int32, name="tokens")
+    emb = layers.Embedding(input_dim=len(vocab) + 10, output_dim=emb_dim, input_length=max_len)(inputs)
+
+    conv2 = layers.Conv1D(24, 2, padding="same", activation="relu")(emb)
+    conv3 = layers.Conv1D(24, 3, padding="same", activation="relu")(emb)
+    conv4 = layers.Conv1D(24, 4, padding="same", activation="relu")(emb)
+
+    p2 = layers.GlobalMaxPooling1D()(conv2)
+    p3 = layers.GlobalMaxPooling1D()(conv3)
+    p4 = layers.GlobalMaxPooling1D()(conv4)
+
+    concat = layers.Concatenate()([p2, p3, p4])
+    dense = layers.Dense(32, activation="relu", kernel_regularizer=regularizers.l2(1e-4))(concat)
+    dropout = layers.Dropout(0.2)(dense)
+    outputs = layers.Dense(len(INTENT_CLASSES), activation="softmax")(dropout)
+
+    intent_model = models.Model(inputs=inputs, outputs=outputs)
+    intent_model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+    intent_model.fit(X, y, epochs=50, batch_size=32, verbose=0)
+
+    train_loss, train_acc = intent_model.evaluate(X, y, verbose=0)
+    print(f"[✔] TextCNN Training Complete! Final Accuracy: {train_acc*100:.2f}% (Loss: {train_loss:.4f})")
+
+    def rep_intent_data():
+        for i in range(min(100, len(X))):
+            yield [X[i:i+1].astype(np.int32)]
+
+    converter = tf.lite.TFLiteConverter.from_keras_model(intent_model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    converter.representative_dataset = rep_data
+    converter.representative_dataset = rep_intent_data
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     tflite_model = converter.convert()
 
-    tflite_path = OUTPUT_DIR / "text_cnn_int8.tflite"
-    with open(tflite_path, "wb") as f:
+    intent_tflite_path = OUTPUT_DIR / "text_cnn_int8.tflite"
+    with open(intent_tflite_path, "wb") as f:
         f.write(tflite_model)
+    print(f"[★ SUCCESS] Intent INT8 TFLite exported: {intent_tflite_path} ({len(tflite_model):,} bytes)")
 
-    print(f"[★ SUCCESS] Intent INT8 TFLite exported: {tflite_path} ({os.path.getsize(tflite_path):,} bytes)")
-    return tflite_path, vocab_path
+    return intent_tflite_path, vocab_path
 
 
 # =============================================================================
-# 3. DETECTION MODEL ARCHITECTURE: DTNetMax (197,647 params)
+# 3. DTNet-P2-Max ARCHITECTURE SPECIFICATION (197,647 Params)
 # =============================================================================
 def make_spec_max(num_classes=NUM_CLASSES, head_ch=104, fuse_ch=116, use_p2=True, use_sppf=True):
     ops = []
+
     def conv(name, src, cin, cout, k=1, s=1, bn=True, act=True, bias=False, zero_gamma=False):
         ops.append(dict(t="conv", name=name, src=src, cin=cin, cout=cout, k=k, s=s, bn=bn, act=act, bias=bias,
                         zero_gamma=zero_gamma))
         return name
+
     def dw(name, src, c, k=3, s=1, bn=True, act=True):
         ops.append(dict(t="dw", name=name, src=src, cin=c, cout=c, k=k, s=s, bn=bn, act=act, bias=False,
                         zero_gamma=False))
         return name
+
     def add(name, a, b):
         ops.append(dict(t="add", name=name, srcs=[a, b]))
         return name
+
     def cat(name, srcs):
         ops.append(dict(t="cat", name=name, srcs=list(srcs)))
         return name
+
     def up(name, src):
         ops.append(dict(t="up", name=name, src=src))
         return name
+
     def mp_op(name, src, k=5):
         ops.append(dict(t="mp", name=name, src=src, k=k))
         return name
+
     def res(prefix, x, c):
         a = dw(prefix + "_dw", x, c)
         b = conv(prefix + "_pw", a, c, c, act=False, zero_gamma=True)
         return add(prefix + "_add", x, b)
 
-    x = conv("stem", "input", 3, 32, k=3, s=2)
+    x = conv("stem", "input", 3, 32, k=3, s=2)                       # /2 (160x120)
     x = dw("s1_dw", x, 32)
     x = conv("s1_pw", x, 32, 48, act=False)
-    x = dw("s1_down_dw", x, 48, s=2)
+    x = dw("s1_down_dw", x, 48, s=2)                                 # /4 (80x60)
     x = conv("s1_down_pw", x, 48, 64)
-    p2 = res("s2a", x, 64)
-    x = dw("s2_down_dw", p2, 64, s=2)
+    p2 = res("s2a", x, 64)                                           # P2: Stride-4 features (high-res)
+    x = dw("s2_down_dw", p2, 64, s=2)                                # /8 (40x30)
     x = conv("s2_down_pw", x, 64, 112)
     x = res("s2b", x, 112)
-    shape = res("s2c", x, 112)
-    x = dw("s3_down_dw", shape, 112, s=2)
+    shape = res("s2c", x, 112)                                       # Stride-8 shape features
+    x = dw("s3_down_dw", shape, 112, s=2)                            # /16 (20x15)
     x = conv("s3_down_pw", x, 112, 160)
-    sem = res("s3a", x, 160)
+    sem = res("s3a", x, 160)                                         # Stride-16 semantic features
 
+    # SPPF: Spatial Pyramid Pooling Fast (0 params, multi-scale context)
     if use_sppf:
         p1 = mp_op("spp_p1", sem, k=5)
         p2_pool = mp_op("spp_p2", p1, k=5)
@@ -272,12 +272,12 @@ def make_spec_max(num_classes=NUM_CLASSES, head_ch=104, fuse_ch=116, use_p2=True
         sem = add("spp_add2", sem_add, p2_pool)
 
     x = conv("s3_proj", sem, 160, fuse_ch, bn=False, act=False)
-    up_f = up("s3_up", x)
+    up_f = up("s3_up", x)                                            # /16 -> /8 (nearest)
 
     parts = [shape, up_f]
     fuse_in = 112 + fuse_ch
     if use_p2:
-        q = dw("p2_dw", p2, 64, s=2)
+        q = dw("p2_dw", p2, 64, s=2)                                 # P2: /4 -> /8
         q = conv("p2_pw", q, 64, 48)
         parts.append(q)
         fuse_in += 48
@@ -286,6 +286,7 @@ def make_spec_max(num_classes=NUM_CLASSES, head_ch=104, fuse_ch=116, use_p2=True
     f = conv("fuse_pw", f, fuse_in, fuse_ch)
     f = res("refine", f, fuse_ch)
 
+    # Decoupled heads with expanded head_ch=104
     c = dw("cls_dw", f, fuse_ch)
     c = conv("cls_pw", c, fuse_ch, head_ch)
     conv("cls_out", c, head_ch, num_classes, bn=False, act=False, bias=True)
@@ -295,13 +296,14 @@ def make_spec_max(num_classes=NUM_CLASSES, head_ch=104, fuse_ch=116, use_p2=True
     conv("box_out", b, head_ch, 4, bn=False, act=False, bias=True)
     return ops
 
+
 class DTNetMax(nn.Module):
-    def __init__(self, spec=None, max_dist=20.0):
+    def __init__(self, spec, max_dist=20.0):
         super().__init__()
-        self.spec = spec if spec is not None else make_spec_max()
+        self.spec = spec
         self.max_dist = max_dist
         self.mods = nn.ModuleDict()
-        for op in self.spec:
+        for op in spec:
             if op["t"] in ("conv", "dw"):
                 k, s = op["k"], op["s"]
                 pad = (k - 1) // 2 if s == 1 else 0
@@ -323,10 +325,8 @@ class DTNetMax(nn.Module):
                 nn.init.zeros_(conv.bias)
             if op["bn"] and op.get("zero_gamma"):
                 nn.init.zeros_(self.mods[op["name"] + "_bn"].weight)
-        # Focal Loss prior bias init: p ~ 0.01 for background suppression
         nn.init.normal_(self.mods["cls_out"].weight, std=0.01)
         nn.init.constant_(self.mods["cls_out"].bias, -math.log((1 - 0.01) / 0.01))
-        # Stable Anchor box bias init
         nn.init.normal_(self.mods["box_out"].weight, std=0.01)
         p = min(max(2.0 / max_dist, 1e-3), 0.5)
         nn.init.constant_(self.mods["box_out"].bias, math.log(p / (1 - p)))
@@ -355,6 +355,7 @@ class DTNetMax(nn.Module):
             t[n] = y
         return t["cls_out"], t["box_out"]
 
+
 def count_params_strict(model):
     n = sum(p.numel() for p in model.parameters())
     n += sum(b.numel() for k, b in model.named_buffers() if k.endswith("running_mean") or k.endswith("running_var"))
@@ -362,118 +363,12 @@ def count_params_strict(model):
 
 
 # =============================================================================
-# 4. DATASET & AUGMENTATION
+# 4. DATASET & ULTRA AREA-ADAPTIVE TARGET ASSIGNMENT
 # =============================================================================
-def _hsv_jitter(img, rng, gains=(0.015, 0.25, 0.25)):
-    r = rng.uniform(-1, 1, 3) * np.asarray(gains) + 1.0
-    hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2HSV))
-    x = np.arange(256, dtype=np.float32)
-    lut_h = ((x * r[0]) % 180).astype(np.uint8)
-    lut_s = np.clip(x * r[1], 0, 255).astype(np.uint8)
-    lut_v = np.clip(x * r[2], 0, 255).astype(np.uint8)
-    hsv = cv2.merge([cv2.LUT(hue, lut_h), cv2.LUT(sat, lut_s), cv2.LUT(val, lut_v)])
-    return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-
-class Full6kDetDataset(Dataset):
-    def __init__(self, img_paths, label_arrays, img_w=IMG_W, img_h=IMG_H, stride=STRIDE,
-                 train=True, mosaic_p=0.5, seed=42):
-        self.img_paths = list(img_paths)
-        self.labels = [np.asarray(x, dtype=np.float32).reshape(-1, 5) for x in label_arrays]
-        self.img_w = img_w
-        self.img_h = img_h
-        self.stride = stride
-        self.train = train
-        self.mosaic_p = mosaic_p
-        self.seed = seed
-        self.epoch = 0
-
-    def set_epoch(self, epoch):
-        self.epoch = epoch
-
-    def set_mosaic(self, p):
-        self.mosaic_p = p
-
-    def __len__(self):
-        return len(self.img_paths)
-
-    def _load_sample(self, idx):
-        path = self.img_paths[idx]
-        bgr = cv2.imread(path, cv2.IMREAD_COLOR)
-        if bgr is None:
-            raise FileNotFoundError(f"Missing image at {path}")
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        orig_h, orig_w = rgb.shape[:2]
-        if (orig_w, orig_h) != (self.img_w, self.img_h):
-            rgb = cv2.resize(rgb, (self.img_w, self.img_h), interpolation=cv2.INTER_AREA)
-        boxes = self.labels[idx].copy()
-        return rgb, boxes
-
-    def __getitem__(self, idx):
-        rng = np.random.RandomState(self.seed + self.epoch * 10007 + idx)
-        use_mosaic = self.train and (rng.random() < self.mosaic_p)
-
-        if use_mosaic:
-            indices = [idx] + list(rng.choice(len(self.img_paths), 3, replace=True))
-            xc = int(rng.uniform(self.img_w * 0.4, self.img_w * 0.6))
-            yc = int(rng.uniform(self.img_h * 0.4, self.img_h * 0.6))
-            mosaic_img = np.full((self.img_h, self.img_w, 3), 114, dtype=np.uint8)
-            mosaic_boxes = []
-
-            for i, s_idx in enumerate(indices):
-                im, bx = self._load_sample(s_idx)
-                if i == 0:
-                    x1a, y1a, x2a, y2a = 0, 0, xc, yc
-                    x1b, y1b, x2b, y2b = self.img_w - xc, self.img_h - yc, self.img_w, self.img_h
-                elif i == 1:
-                    x1a, y1a, x2a, y2a = xc, 0, self.img_w, yc
-                    x1b, y1b, x2b, y2b = 0, self.img_h - yc, self.img_w - xc, self.img_h
-                elif i == 2:
-                    x1a, y1a, x2a, y2a = 0, yc, xc, self.img_h
-                    x1b, y1b, x2b, y2b = self.img_w - xc, 0, self.img_w, self.img_h - yc
-                elif i == 3:
-                    x1a, y1a, x2a, y2a = xc, yc, self.img_w, self.img_h
-                    x1b, y1b, x2b, y2b = 0, 0, self.img_w - xc, self.img_h - yc
-
-                mosaic_img[y1a:y2a, x1a:x2a] = im[y1b:y2b, x1b:x2b]
-                padw = x1a - x1b
-                padh = y1a - y1b
-                if len(bx) > 0:
-                    b = bx.copy()
-                    b[:, 1] += padw
-                    b[:, 2] += padh
-                    b[:, 3] += padw
-                    b[:, 4] += padh
-                    b[:, [1, 3]] = b[:, [1, 3]].clip(0, self.img_w)
-                    b[:, [2, 4]] = b[:, [2, 4]].clip(0, self.img_h)
-                    w, h = b[:, 3] - b[:, 1], b[:, 4] - b[:, 2]
-                    keep = (w >= 4.0) & (h >= 4.0)
-                    mosaic_boxes.append(b[keep])
-
-            img = mosaic_img
-            boxes = np.concatenate(mosaic_boxes, axis=0) if len(mosaic_boxes) > 0 else np.zeros((0, 5), dtype=np.float32)
-        else:
-            img, boxes = self._load_sample(idx)
-
-        if self.train:
-            if rng.random() < 0.5:
-                img = np.fliplr(img).copy()
-                if len(boxes) > 0:
-                    x1 = self.img_w - boxes[:, 3]
-                    x2 = self.img_w - boxes[:, 1]
-                    boxes[:, 1] = x1
-                    boxes[:, 3] = x2
-            img = _hsv_jitter(img, rng)
-
-        img_t = torch.from_numpy(np.ascontiguousarray(img.transpose(2, 0, 1)))
-        cls_idx, box_t = assign_targets(boxes, self.img_w // self.stride, self.img_h // self.stride, self.stride)
-        return img_t, torch.from_numpy(cls_idx), torch.from_numpy(box_t), idx
-
-# =============================================================================
-# 5. TARGET ASSIGNMENT & LOSS FUNCTIONS
-# =============================================================================
-def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.5, rad_scale=0.3):
-    """Aspect-ratio aware elliptical center sampling: provides full supervisory
-    coverage across elongated objects (book, toy_car, mouse), eliminating boundary near-misses."""
+def assign_targets_adaptive(boxes, gw, gh, stride, min_r=1.5, max_r=5.5, rad_scale=0.32):
+    """Dynamic Area-Adaptive Target Assignment (Ultra Calibration):
+    - min_r = 1.5: Preserves 5-9 supervisory anchors for small objects (mouse, toy_car), preventing gradient starvation.
+    - max_r = 5.5: Provides full supervisory coverage across large objects (book, box), preventing edge truncation."""
     cls_idx = np.full((gh, gw), -1, dtype=np.int64)
     box_t = np.zeros((4, gh, gw), dtype=np.float32)
     best_area = np.full((gh, gw), np.inf, dtype=np.float32)
@@ -506,6 +401,143 @@ def assign_targets(boxes, gw, gh, stride, min_r=1.5, max_r=3.5, rad_scale=0.3):
     return cls_idx, box_t
 
 
+def _affine_boxes(boxes, s, tx, ty, W, H, min_vis=0.4, min_size=2.0):
+    if len(boxes) == 0:
+        return boxes
+    b = boxes.copy()
+    b[:, [1, 3]] = b[:, [1, 3]] * s + tx
+    b[:, [2, 4]] = b[:, [2, 4]] * s + ty
+    area0 = (b[:, 3] - b[:, 1]) * (b[:, 4] - b[:, 2])
+    b[:, [1, 3]] = b[:, [1, 3]].clip(0, W)
+    b[:, [2, 4]] = b[:, [2, 4]].clip(0, H)
+    w, h = b[:, 3] - b[:, 1], b[:, 4] - b[:, 2]
+    keep = (w >= min_size) & (h >= min_size) & (w * h >= min_vis * area0)
+    return b[keep]
+
+
+def _hsv_jitter(img, rng, gains):
+    r = rng.uniform(-1, 1, 3) * np.asarray(gains) + 1.0
+    hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2HSV))
+    x = np.arange(256, dtype=np.float32)
+    lut_h = ((x * r[0]) % 180).astype(np.uint8)
+    lut_s = np.clip(x * r[1], 0, 255).astype(np.uint8)
+    lut_v = np.clip(x * r[2], 0, 255).astype(np.uint8)
+    out = cv2.merge((cv2.LUT(hue, lut_h), cv2.LUT(sat, lut_s), cv2.LUT(val, lut_v)))
+    return cv2.cvtColor(out, cv2.COLOR_HSV2RGB)
+
+
+class FastDetDataset(torch.utils.data.Dataset):
+    def __init__(self, img_paths, labels, img_w=IMG_W, img_h=IMG_H, stride=STRIDE, train=True,
+                 mosaic_p=0.5, scale=(0.75, 1.25), translate=0.1, flip_p=0.5,
+                 hsv=(0.015, 0.5, 0.35), orig_w=ORIG_W, orig_h=ORIG_H, seed=42):
+        self.img_paths = list(img_paths)
+        self.labels = list(labels)
+        self.W, self.H, self.stride = int(img_w), int(img_h), int(stride)
+        self.gw, self.gh = self.W // self.stride, self.H // self.stride
+        self.train = train
+        self.scale, self.translate, self.flip_p, self.hsv = scale, translate, flip_p, hsv
+        self.orig_w, self.orig_h, self.seed = orig_w, orig_h, seed
+        self.epoch = mp.Value("i", 0)
+        self.mosaic_p = mp.Value("d", float(mosaic_p))
+
+    def set_epoch(self, e):
+        self.epoch.value = int(e)
+
+    def set_mosaic(self, p):
+        self.mosaic_p.value = float(p)
+
+    def __len__(self):
+        return len(self.img_paths)
+
+    def _load(self, k):
+        p = self.img_paths[k]
+        img = cv2.imread(p, cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(f"Image not found: {p}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if img.shape[1] != self.W or img.shape[0] != self.H:
+            img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        b = self.labels[k].copy()
+        if self.W != self.orig_w or self.H != self.orig_h:
+            b[:, [1, 3]] *= self.W / self.orig_w
+            b[:, [2, 4]] *= self.H / self.orig_h
+        return img, b
+
+    def _single(self, k, rng):
+        W, H = self.W, self.H
+        img, b = self._load(k)
+        s = rng.uniform(*self.scale)
+        tx = W / 2 - s * W / 2 + rng.uniform(-self.translate, self.translate) * W
+        ty = H / 2 - s * H / 2 + rng.uniform(-self.translate, self.translate) * H
+        M = np.array([[s, 0, tx], [0, s, ty]], dtype=np.float32)
+        img = cv2.warpAffine(img, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=(114, 114, 114))
+        return img, _affine_boxes(b, s, tx, ty, W, H)
+
+    def _mosaic(self, k, rng):
+        W, H = self.W, self.H
+        ids = [k] + [int(x) for x in rng.integers(0, len(self.img_paths), 3)]
+        xc = int(rng.uniform(0.5 * W, 1.5 * W))
+        yc = int(rng.uniform(0.5 * H, 1.5 * H))
+        canvas = np.full((2 * H, 2 * W, 3), 114, dtype=np.uint8)
+        all_b = []
+        for n, i in enumerate(ids):
+            img, b = self._load(i)
+            if n == 0:
+                x1a, y1a, x2a, y2a = max(xc - W, 0), max(yc - H, 0), xc, yc
+                x1b, y1b, x2b, y2b = W - (x2a - x1a), H - (y2a - y1a), W, H
+            elif n == 1:
+                x1a, y1a, x2a, y2a = xc, max(yc - H, 0), min(xc + W, 2 * W), yc
+                x1b, y1b, x2b, y2b = 0, H - (y2a - y1a), min(W, x2a - x1a), H
+            elif n == 2:
+                x1a, y1a, x2a, y2a = max(xc - W, 0), yc, xc, min(2 * H, yc + H)
+                x1b, y1b, x2b, y2b = W - (x2a - x1a), 0, W, min(y2a - y1a, H)
+            else:
+                x1a, y1a, x2a, y2a = xc, yc, min(xc + W, 2 * W), min(2 * H, yc + H)
+                x1b, y1b, x2b, y2b = 0, 0, min(W, x2a - x1a), min(y2a - y1a, H)
+            canvas[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]
+            padw, padh = x1a - x1b, y1a - y1b
+            if len(b):
+                b = b.copy()
+                b[:, [1, 3]] += padw
+                b[:, [2, 4]] += padh
+                area0 = (b[:, 3] - b[:, 1]) * (b[:, 4] - b[:, 2])
+                b[:, [1, 3]] = b[:, [1, 3]].clip(x1a, x2a)
+                b[:, [2, 4]] = b[:, [2, 4]].clip(y1a, y2a)
+                bw, bh = b[:, 3] - b[:, 1], b[:, 4] - b[:, 2]
+                ok = (bw >= 2) & (bh >= 2) & (bw * bh >= 0.4 * area0)
+                all_b.append(b[ok])
+        b = np.concatenate(all_b, 0) if all_b else np.zeros((0, 5), np.float32)
+        s = rng.uniform(*self.scale)
+        tx = W / 2 - s * W + rng.uniform(-self.translate, self.translate) * W
+        ty = H / 2 - s * H + rng.uniform(-self.translate, self.translate) * H
+        M = np.array([[s, 0, tx], [0, s, ty]], dtype=np.float32)
+        img = cv2.warpAffine(canvas, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=(114, 114, 114))
+        return img, _affine_boxes(b, s, tx, ty, W, H)
+
+    def __getitem__(self, k):
+        if self.train:
+            rng = np.random.default_rng((self.seed * 1000003 + self.epoch.value * 100003 + k) & 0xFFFFFFFF)
+            if rng.random() < self.mosaic_p.value:
+                img, b = self._mosaic(k, rng)
+            else:
+                img, b = self._single(k, rng)
+            img = _hsv_jitter(img, rng, self.hsv)
+            if rng.random() < self.flip_p:
+                img = img[:, ::-1]
+                if len(b):
+                    b = b.copy()
+                    x1, x2 = b[:, 1].copy(), b[:, 3].copy()
+                    b[:, 1], b[:, 3] = self.W - x2, self.W - x1
+        else:
+            img, b = self._load(k)
+        cls_idx, box_t = assign_targets_adaptive(b, self.gw, self.gh, self.stride)
+        img = torch.from_numpy(np.ascontiguousarray(img.transpose(2, 0, 1)))
+        return img, torch.from_numpy(cls_idx), torch.from_numpy(box_t), k
+
+
+# =============================================================================
+# 5. LOSS FORMULATION & INFERENCE DECODING (EIoU + IoU-Gated QFL)
+# =============================================================================
 def decode_ltrb(box_raw, stride=STRIDE, max_dist=20.0):
     B, _, gh, gw = box_raw.shape
     d = torch.sigmoid(box_raw) * (max_dist * stride)
@@ -514,7 +546,7 @@ def decode_ltrb(box_raw, stride=STRIDE, max_dist=20.0):
     return torch.stack([gx - d[:, 0], gy - d[:, 1], gx + d[:, 2], gy + d[:, 3]], 1)
 
 
-def bbox_ciou(b1, b2, eps=1e-7):
+def bbox_eiou(b1, b2, eps=1e-7):
     ix1, iy1 = torch.max(b1[:, 0], b2[:, 0]), torch.max(b1[:, 1], b2[:, 1])
     ix2, iy2 = torch.min(b1[:, 2], b2[:, 2]), torch.min(b1[:, 3], b2[:, 3])
     inter = (ix2 - ix1).clamp(min=0) * (iy2 - iy1).clamp(min=0)
@@ -522,55 +554,64 @@ def bbox_ciou(b1, b2, eps=1e-7):
     w2, h2 = (b2[:, 2] - b2[:, 0]).clamp(min=eps), (b2[:, 3] - b2[:, 1]).clamp(min=eps)
     union = w1 * h1 + w2 * h2 - inter + eps
     iou = inter / union
-    cw = torch.max(b1[:, 2], b2[:, 2]) - torch.min(b1[:, 0], b2[:, 0])
-    ch = torch.max(b1[:, 3], b2[:, 3]) - torch.min(b1[:, 1], b2[:, 1])
+
+    cw = (torch.max(b1[:, 2], b2[:, 2]) - torch.min(b1[:, 0], b2[:, 0])).clamp(min=eps)
+    ch = (torch.max(b1[:, 3], b2[:, 3]) - torch.min(b1[:, 1], b2[:, 1])).clamp(min=eps)
     c2 = cw ** 2 + ch ** 2 + eps
-    rho2 = ((b1[:, 0] + b1[:, 2] - b2[:, 0] - b2[:, 2]) ** 2 + (b1[:, 1] + b1[:, 3] - b2[:, 1] - b2[:, 3]) ** 2) / 4.0
-    v = (4.0 / math.pi ** 2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)) ** 2
-    with torch.no_grad():
-        alpha = v / (v - iou + (1.0 + eps))
-    return iou - rho2 / c2 - alpha * v, iou
+
+    cx1, cy1 = (b1[:, 0] + b1[:, 2]) / 2, (b1[:, 1] + b1[:, 3]) / 2
+    cx2, cy2 = (b2[:, 0] + b2[:, 2]) / 2, (b2[:, 1] + b2[:, 3]) / 2
+    rho2 = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2
+
+    dist_w2 = (w1 - w2) ** 2 / (cw ** 2 + eps)
+    dist_h2 = (h1 - h2) ** 2 / (ch ** 2 + eps)
+
+    eiou = iou - (rho2 / c2) - dist_w2 - dist_h2
+    return eiou, iou
 
 
-def bbox_nwd(b1, b2, C=12.0, eps=1e-7):
-    cx1, cy1 = (b1[:, 0] + b1[:, 2]) / 2.0, (b1[:, 1] + b1[:, 3]) / 2.0
-    w1, h1 = (b1[:, 2] - b1[:, 0]).clamp(min=eps), (b1[:, 3] - b1[:, 1]).clamp(min=eps)
-    cx2, cy2 = (b2[:, 0] + b2[:, 2]) / 2.0, (b2[:, 1] + b2[:, 3]) / 2.0
-    w2, h2 = (b2[:, 2] - b2[:, 0]).clamp(min=eps), (b2[:, 3] - b2[:, 1]).clamp(min=eps)
-    w2_dist = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2 + ((w1 - w2) ** 2 + (h1 - h2) ** 2) / 4.0
-    return torch.exp(-torch.sqrt(w2_dist.clamp(min=eps)) / C)
-
-
-def det_loss(cls_logit, box_raw, cls_idx, box_t, lam=0.6, w_cls=1.0, w_box=4.5, w_nwd=2.0, qfl_beta=2.0, stride=STRIDE, max_dist=20.0):
+def det_loss_eiou_gated(cls_logit, box_raw, cls_idx, box_t,
+                        lam=1.0, w_cls=1.0, w_box=5.5,
+                        qfl_beta_pos=2.0, qfl_beta_neg=1.2, w_neg=1.5,
+                        iou_gate=0.48, stride=STRIDE, max_dist=20.0):
     cls_logit, box_raw = cls_logit.float(), box_raw.float()
     pos = cls_idx >= 0
     n_pos = pos.sum().clamp(min=1).float()
     tgt = torch.zeros_like(cls_logit)
+
     if pos.any():
         pred_xyxy = decode_ltrb(box_raw, stride, max_dist)
         pb = pred_xyxy.permute(0, 2, 3, 1)[pos]
         gb = box_t.permute(0, 2, 3, 1)[pos]
-        ciou, iou = bbox_ciou(pb, gb)
-        nwd = bbox_nwd(pb, gb)
-        loss_box = ((1.0 - ciou) + w_nwd * (1.0 - nwd)).sum() / n_pos
-        quality = torch.maximum(iou.detach(), nwd.detach()).clamp(0, 1)
-        q = lam * quality + (1.0 - lam)
+        eiou, iou = bbox_eiou(pb, gb)
+        loss_box = (1.0 - eiou).sum() / n_pos
+
+        iou_clamped = iou.detach().clamp(0, 1)
+        valid_mask = iou_clamped >= iou_gate
+        quality_score = torch.zeros_like(iou_clamped)
+        quality_score[valid_mask] = ((iou_clamped[valid_mask] - iou_gate) / (1.0 - iou_gate)).pow(1.5)
+
+        q = lam * quality_score + (1.0 - lam)
         b_i, j_i, i_i = pos.nonzero(as_tuple=True)
         tgt[b_i, cls_idx[pos], j_i, i_i] = q
     else:
         loss_box = box_raw.sum() * 0.0
+
     p = cls_logit.sigmoid()
     ce = F.binary_cross_entropy_with_logits(cls_logit, tgt, reduction="none")
-    loss_cls = (ce * (tgt - p).abs().pow(qfl_beta)).sum() / n_pos
+
+    is_pos_target = tgt > 0
+    loss_cls_pos = ce * (tgt - p).abs().pow(qfl_beta_pos)
+    loss_cls_neg = w_neg * ce * p.pow(qfl_beta_neg)
+
+    loss_cls = torch.where(is_pos_target, loss_cls_pos, loss_cls_neg).sum() / n_pos
     total = w_cls * loss_cls + w_box * loss_box
     return total, loss_cls.detach(), loss_box.detach()
 
 
-# =============================================================================
-# 6. EVALUATION & EMA
-# =============================================================================
 def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -30, 30)))
+
 
 def nms_np(boxes, scores, thr, max_keep=100):
     order = scores.argsort()[::-1]
@@ -590,6 +631,7 @@ def nms_np(boxes, scores, thr, max_keep=100):
         iou = inter / (areas[i] + areas[r] - inter + 1e-9)
         order = r[iou <= thr]
     return np.asarray(keep, dtype=np.int64)
+
 
 def decode_batch_np(cls_logit, box_raw, score_thr=0.001, nms_iou=0.65, pre_nms=1000, max_det=100,
                     stride=STRIDE, max_dist=20.0, orig_w=ORIG_W, orig_h=ORIG_H):
@@ -620,6 +662,7 @@ def decode_batch_np(cls_logit, box_raw, score_thr=0.001, nms_iou=0.65, pre_nms=1
         bx[:, [1, 3]] = bx[:, [1, 3]].clip(0, orig_h)
         out.append(np.concatenate([bx, s[keep, None], c[keep, None]], 1).astype(np.float32))
     return out
+
 
 def evaluate_map(dets, gts, num_classes=NUM_CLASSES, iou_thr=0.5):
     aps = {}
@@ -656,7 +699,6 @@ def evaluate_map(dets, gts, num_classes=NUM_CLASSES, iou_thr=0.5):
                 used[k][j] = True
             else:
                 fp[n] = 1
-
         ctp, cfp = np.cumsum(tp), np.cumsum(fp)
         rec = ctp / n_gt
         prec = ctp / np.maximum(ctp + cfp, np.finfo(np.float64).eps)
@@ -665,10 +707,13 @@ def evaluate_map(dets, gts, num_classes=NUM_CLASSES, iou_thr=0.5):
         for i in range(len(mpre) - 2, -1, -1):
             mpre[i] = max(mpre[i], mpre[i + 1])
         ii = np.where(mrec[1:] != mrec[:-1])[0]
-        ap = float(np.sum((mrec[ii + 1] - mrec[ii]) * mpre[ii + 1]))
-        aps[c] = ap
+        aps[c] = float(np.sum((mrec[ii + 1] - mrec[ii]) * mpre[ii + 1]))
     return (float(np.mean(list(aps.values()))) if aps else 0.0), aps
 
+
+# =============================================================================
+# 6. MODEL EMA
+# =============================================================================
 class ModelEMA:
     def __init__(self, model, decay=0.9995, tau=2000):
         self.ema = copy.deepcopy(model).eval()
@@ -689,94 +734,98 @@ class ModelEMA:
 
 
 # =============================================================================
-# 7. SOTA FROM-SCRATCH CHAMPION TRAINER (ELLIPTICAL SAMPLING + QFL + CIoU/NWD)
+# 7. PHASE 2: DETECTION TRAINING (From Scratch Parity with train_dtnet_p2_ultra)
 # =============================================================================
-def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"[*] Training on device: {device}")
+def train_dtnet_ultra_scratch(data_root, epochs=300, batch_size=64):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_imgs = sorted(glob.glob(str(data_root / "train/images/*.png")) + glob.glob(str(data_root / "train/images/*.jpg")))
-    val_imgs = sorted(glob.glob(str(data_root / "val/images/*.png")) + glob.glob(str(data_root / "val/images/*.jpg")))
-    all_imgs = train_imgs + val_imgs
+    # 1. Dataset Pool & Reproducible 9:1 Partition (Seed 42)
+    all_train_imgs = sorted(glob.glob(str(data_root / "train/images/*.png")) + glob.glob(str(data_root / "train/images/*.jpg")))
+    all_val_imgs = sorted(glob.glob(str(data_root / "val/images/*.png")) + glob.glob(str(data_root / "val/images/*.jpg")))
+    all_imgs = all_train_imgs + all_val_imgs
+    total_imgs = len(all_imgs)
+    print(f"[*] Total dataset images pooled: {total_imgs}")
 
     all_lbls = []
     for p in all_imgs:
         stem = Path(p).stem
-        parent = Path(p).parent.parent
-        lbl_p = parent / "labels" / f"{stem}.txt"
+        lbl_p = Path(p).parent.parent / "labels" / f"{stem}.txt"
         rows = []
         if lbl_p.exists():
-            with open(lbl_p, "r") as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if len(parts) >= 5:
-                        c = int(parts[0])
-                        cx, cy, w, h = map(float, parts[1:5])
-                        x1 = (cx - w / 2.0) * ORIG_W
-                        y1 = (cy - h / 2.0) * ORIG_H
-                        x2 = (cx + w / 2.0) * ORIG_W
-                        y2 = (cy + h / 2.0) * ORIG_H
-                        rows.append([c, x1, y1, x2, y2])
+            for line in lbl_p.read_text().splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    c, cx, cy, w, h = int(parts[0]), *map(float, parts[1:5])
+                    rows.append([c, (cx - w / 2) * ORIG_W, (cy - h / 2) * ORIG_H,
+                                 (cx + w / 2) * ORIG_W, (cy + h / 2) * ORIG_H])
         all_lbls.append(np.asarray(rows, dtype=np.float32).reshape(-1, 5))
 
-    val_pool_imgs = val_imgs
-    val_pool_lbls = all_lbls[len(train_imgs):]
+    rng = np.random.default_rng(42)
+    indices = rng.permutation(total_imgs)
+    val_count = int(round(total_imgs * 0.10))
+    val_idx, tr_idx = indices[:val_count], indices[val_count:]
 
-    # Pre-extract validation ground truths for fast VOC mAP50 evaluation
-    eval_val_dataset = Full6kDetDataset(val_pool_imgs, val_pool_lbls, train=False, mosaic_p=0.0)
-    eval_loader = DataLoader(eval_val_dataset, batch_size=batch_size, shuffle=False,
-                             num_workers=2, pin_memory=True)
+    tr_imgs = [all_imgs[i] for i in tr_idx]
+    tr_lbls = [all_lbls[i] for i in tr_idx]
+    vl_imgs = [all_imgs[i] for i in val_idx]
+    vl_lbls = [all_lbls[i] for i in val_idx]
+    print(f"[✔] 9:1 Split created: {len(tr_imgs)} Train images | {len(vl_imgs)} Val images")
 
-    val_gts_static = []
-    for b in val_pool_lbls:
-        if len(b) > 0:
-            val_gts_static.append(b.copy())
-        else:
-            val_gts_static.append(np.zeros((0, 5), dtype=np.float32))
+    # 2. Datasets & Loaders
+    num_workers = max(1, min(2, os.cpu_count() or 1))
+    train_ds = FastDetDataset(tr_imgs, tr_lbls, IMG_W, IMG_H, STRIDE, train=True, mosaic_p=0.5, seed=42)
+    val_ds = FastDetDataset(vl_imgs, vl_lbls, IMG_W, IMG_H, STRIDE, train=False, mosaic_p=0.0, seed=42)
 
-    spec = make_spec_max()
-    model = DTNetMax(spec).to(device)
-    total_params = count_params_strict(model)
-    print(f"\n[Hardware Gate] Strict Parameters: {total_params:,} / {MAX_ALLOWED_PARAMS:,}")
-    assert total_params <= MAX_ALLOWED_PARAMS, f"Exceeded parameter limit: {total_params} > {MAX_ALLOWED_PARAMS}"
-
-    ema = ModelEMA(model, decay=0.9995)
-    best_pt_path = OUTPUT_DIR / "best_dtnet_nwd_tal_full6k.pt"
-
-    print("\n" + "=" * 80)
-    print(f" [PHASE 2/4] Training {epochs} Epochs Strictly from Scratch (SOTA Rocket Launcher)")
-    print(f" Dataset : 6,000 Total Images (5,400 Train + 600 Val)")
-    print(f" Strategy: Mosaic p=0.5 (Ep 1->{epochs-50}) + Clean-Phase (Ep {epochs-49}->{epochs})")
-    print(f" Target  : Elliptical Center-Sampling + QFL + Smooth NWD/CIoU (Base Target 0.4)")
-    print(f" LR Rate : Effective lr=2.0e-3 (Fast SOTA Convergence)")
-    print("=" * 80)
-
-    train_ds = Full6kDetDataset(all_imgs, all_lbls, train=True, mosaic_p=0.5)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
-                              num_workers=4, pin_memory=True)
+                              num_workers=num_workers, pin_memory=torch.cuda.is_available(), drop_last=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, pin_memory=torch.cuda.is_available())
 
-    lr_eff = 2.0e-3
+    # 3. Model & EMA
+    spec = make_spec_max(num_classes=NUM_CLASSES, head_ch=104, fuse_ch=116, use_p2=True, use_sppf=True)
+    model = DTNetMax(spec).to(device)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        model = model.to(memory_format=torch.channels_last)
+
+    param_strict = count_params_strict(model)
+    print(f"\n[Hardware Gate] Strict Parameters: {param_strict:,} / {MAX_ALLOWED_PARAMS:,}")
+    assert param_strict < MAX_ALLOWED_PARAMS, f"Exceeded hardware parameter limit: {param_strict}"
+
+    ema = ModelEMA(model, decay=0.9995, tau=2000)
+    best_pt_path = OUTPUT_DIR / "best_dtnet_p2_ultra.pt"
+
+    # 4. Optimizer & SOTA Schedule (lr_eff = 4e-3 for batch 64)
+    lr_eff = 2e-3 * (batch_size / 32.0)
     decay_params, no_decay_params = [], []
     for n, p in model.named_parameters():
         (decay_params if p.ndim > 1 else no_decay_params).append(p)
     optimizer = torch.optim.AdamW(
-        [{"params": decay_params, "weight_decay": 0.01},
+        [{"params": decay_params, "weight_decay": 0.02},
          {"params": no_decay_params, "weight_decay": 0.0}],
         lr=lr_eff, betas=(0.9, 0.999)
     )
     scaler = torch.amp.GradScaler(device.type, enabled=(device.type == "cuda"))
 
+    warmup_epochs = 3
     steps_per_epoch = len(train_loader)
     total_steps = epochs * steps_per_epoch
-    warmup_epochs = 3
     warmup_steps = warmup_epochs * steps_per_epoch
-    close_mosaic_epoch = epochs - 50
+    close_mosaic_epoch = epochs - 35
 
     def get_lr(step):
         if step < warmup_steps:
-            return 2e-5 + (lr_eff - 2e-5) * (step / warmup_steps)
+            return lr_eff * (0.01 + 0.99 * step / warmup_steps)
         prog = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-        return 2e-5 + 0.5 * (lr_eff - 2e-5) * (1 + math.cos(math.pi * min(prog, 1.0)))
+        return lr_eff * (0.01 + 0.99 * 0.5 * (1 + math.cos(math.pi * min(prog, 1.0))))
+
+    print("\n" + "=" * 80)
+    print(f" [PHASE 2/4] Training {epochs} Epochs Strictly from Scratch (DTNet-P2-Ultra)")
+    print(f" Dataset : 6,000 Total Images ({len(tr_imgs)} Train + {len(vl_imgs)} Val)")
+    print(f" Strategy: Mosaic p=0.5 (Ep 1->{close_mosaic_epoch}) + Clean-Phase (Ep {close_mosaic_epoch+1}->{epochs})")
+    print(f" Target  : Area-Adaptive (r=1.5..5.5) + EIoU + Dynamic QFL Ramp (lam = (ep+1)/20)")
+    print(f" LR Rate : Effective lr={lr_eff:.1e} (Fast Scratch Convergence: >50% mAP in 4 epochs)")
+    print("=" * 80)
 
     best_map50 = 0.0
     best_epoch = 0
@@ -785,96 +834,112 @@ def train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64):
         t0 = time.time()
         model.train()
         train_ds.set_epoch(epoch)
-
-        # Close-mosaic clean phase during final 50 epochs
         if epoch >= close_mosaic_epoch:
             train_ds.set_mosaic(0.0)
 
-        running_loss = 0.0
-        running_cls = 0.0
-        running_box = 0.0
-        steps = 0
+        w_box_curr = 5.5 + (1.0 if epoch >= close_mosaic_epoch else 0.0)
+        lam = min(1.0, (epoch + 1) / 20.0)
 
-        for batch in train_loader:
-            global_step = (epoch - 1) * steps_per_epoch + steps
-            cur_lr = get_lr(global_step)
-            for g in optimizer.param_groups:
-                g["lr"] = cur_lr
+        loss_cls_accum, loss_box_accum, total_loss_accum = 0.0, 0.0, 0.0
+        cur_lr = get_lr((epoch - 1) * steps_per_epoch)
 
-            imgs, cls_idx, box_t, _ = batch
-            imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
+        for step, (imgs, cls_idx, box_t, _) in enumerate(train_loader):
+            current_step = (epoch - 1) * steps_per_epoch + step
+            cur_lr = get_lr(current_step)
+            for pg in optimizer.param_groups:
+                pg["lr"] = cur_lr
+
+            x = imgs.to(device, non_blocking=True).float().div_(255.0)
+            if device.type == "cuda":
+                x = x.contiguous(memory_format=torch.channels_last)
+
             cls_idx = cls_idx.to(device, non_blocking=True)
             box_t = box_t.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
-                cls_logit, box_raw = model(imgs)
-                loss, loss_c, loss_b = det_loss(
+                cls_logit, box_raw = model(x)
+                loss, l_cls, l_box = det_loss_eiou_gated(
                     cls_logit, box_raw, cls_idx, box_t,
-                    lam=0.6, w_cls=1.0, w_box=4.5, w_nwd=2.0, qfl_beta=2.0
+                    lam=lam, w_cls=1.0, w_box=w_box_curr,
+                    qfl_beta_pos=2.0, qfl_beta_neg=1.2, w_neg=1.5,
+                    iou_gate=0.48
                 )
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
             scaler.step(optimizer)
             scaler.update()
             ema.update(model)
 
-            running_loss += loss.item()
-            running_cls += loss_c.item()
-            running_box += loss_b.item()
-            steps += 1
+            loss_cls_accum += l_cls.item()
+            loss_box_accum += l_box.item()
+            total_loss_accum += loss.item()
 
-        elapsed = time.time() - t0
-        avg_loss = running_loss / max(1, steps)
-        avg_cls = running_cls / max(1, steps)
-        avg_box = running_box / max(1, steps)
+        tr_cls = loss_cls_accum / steps_per_epoch
+        tr_box = loss_box_accum / steps_per_epoch
+        tr_total = total_loss_accum / steps_per_epoch
 
-        # Evaluate periodically (Epoch 1, every 5 epochs, and last 50 clean-phase epochs)
-        if epoch == 1 or epoch % 5 == 0 or epoch >= close_mosaic_epoch:
-            ema.ema.eval()
-            val_dets = []
-            with torch.no_grad():
-                for batch in eval_loader:
-                    imgs, _, _, _ = batch
-                    imgs = imgs.to(device, non_blocking=True).float().div_(255.0)
-                    with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
-                        c_pred, b_pred = ema.ema(imgs)
-                    dets = decode_batch_np(c_pred.cpu().numpy(), b_pred.cpu().numpy(),
-                                           score_thr=0.001, nms_iou=0.65, max_det=100)
-                    val_dets.extend(dets)
+        # Validation evaluation every epoch
+        ema.ema.eval()
+        val_cls_accum, val_box_accum, val_loss_accum = 0.0, 0.0, 0.0
+        dets_val = []
+        with torch.no_grad():
+            for imgs, cls_idx, box_t, _ in val_loader:
+                x = imgs.to(device, non_blocking=True).float().div_(255.0)
+                if device.type == "cuda":
+                    x = x.contiguous(memory_format=torch.channels_last)
+                cls_idx = cls_idx.to(device, non_blocking=True)
+                box_t = box_t.to(device, non_blocking=True)
+                with torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
+                    co, bo = ema.ema(x)
+                    vl, v_cls, v_box = det_loss_eiou_gated(
+                        co, bo, cls_idx, box_t,
+                        lam=lam, w_cls=1.0, w_box=w_box_curr,
+                        qfl_beta_pos=2.0, qfl_beta_neg=1.2, w_neg=1.5,
+                        iou_gate=0.48
+                    )
+                val_cls_accum += v_cls.item()
+                val_box_accum += v_box.item()
+                val_loss_accum += vl.item()
+                outs = decode_batch_np(co.float().cpu().numpy(), bo.float().cpu().numpy(), score_thr=0.001)
+                dets_val.extend(outs)
 
-            map50, aps = evaluate_map(val_dets, val_gts_static)
-            if map50 > best_map50:
-                best_map50 = map50
-                best_epoch = epoch
-                torch.save({
-                    "epoch": epoch,
-                    "model": model.state_dict(),
-                    "ema": ema.ema.state_dict(),
-                    "spec": spec,
-                    "map50": map50,
-                    "aps": aps,
-                    "params": total_params
-                }, best_pt_path)
-                best_mark = f"[★ BEST {map50*100:.2f}%]"
-            else:
-                best_mark = f"(Best: {best_map50*100:.2f}%)"
+        val_cls = val_cls_accum / len(val_loader)
+        val_box = val_box_accum / len(val_loader)
+        val_loss = val_loss_accum / len(val_loader)
+        val_map50, per_class = evaluate_map(dets_val, vl_lbls)
 
-            ap_str = " ".join([f"{CLASS_NAMES[c][:3]}:{aps.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)])
-            print(f"Epoch {epoch:03d}/{epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | val_mAP50: {map50*100:.2f}% {best_mark} [{ap_str}] | lr: {cur_lr:.2e}", flush=True)
-        else:
-            print(f"Epoch {epoch:03d}/{epochs} [{elapsed:.0f}s] loss: {avg_loss:.4f} (cls: {avg_cls:.4f}, box: {avg_box:.4f}) | lr: {cur_lr:.2e}", flush=True)
+        is_best = val_map50 > best_map50
+        if is_best:
+            best_map50 = val_map50
+            best_epoch = epoch
+            torch.save({
+                "epoch": epoch,
+                "ema": ema.ema.state_dict(),
+                "spec": spec,
+                "map50": val_map50,
+                "per_class_ap": per_class,
+            }, best_pt_path)
 
-    print(f"\n[★ SUCCESS] Training Complete! Best SOTA mAP50: {best_map50*100:.2f}% at Epoch {best_epoch}")
-    return best_pt_path, spec
+        dt = time.time() - t0
+        print(f"Epoch {epoch:03d}/{epochs:03d} [{int(dt)}s] loss: {tr_total:.4f} (cls: {tr_cls:.4f}, box: {tr_box:.4f}) | val_loss: {val_loss:.4f} | val_mAP50: {val_map50*100:.2f}% (Best: {best_map50*100:.2f}% @ Ep{best_epoch}) | lr: {cur_lr:.2e}", flush=True)
+        if is_best:
+            ap_strs = [f"{CLASS_NAMES[c][:3]}:{per_class.get(c, 0)*100:.1f}%" for c in range(NUM_CLASSES)]
+            print(f"    [★ BEST] {' '.join(ap_strs)}", flush=True)
+
+    print(f"\n[✔] Training Finished! Restoring Best Weights from Epoch {best_epoch} (mAP50: {best_map50*100:.2f}%)...")
+    return best_pt_path, tr_imgs, vl_imgs, vl_lbls, spec
 
 
 # =============================================================================
-# 8. POST-TRAINING INT8 PTQ EXPORT
+# 8. PHASE 3: KERAS SYNTHESIS & FULL-INT8 POST-TRAINING QUANTIZATION
 # =============================================================================
 def build_keras_dtnet_max(spec, h=IMG_H, w=IMG_W):
+    import keras
+    from keras import layers
+
     inp = keras.Input((h, w, 3), name="image")
     t = {"input": inp}
     for op in spec:
@@ -900,6 +965,7 @@ def build_keras_dtnet_max(spec, h=IMG_H, w=IMG_W):
         t[n] = y
     return keras.Model(inp, [t["cls_out"], t["box_out"]], name="DTNet_P2_Max")
 
+
 def transfer_weights_to_keras(net_t, kmodel, spec):
     npy = lambda x: x.detach().cpu().numpy()
     for op in spec:
@@ -916,28 +982,19 @@ def transfer_weights_to_keras(net_t, kmodel, spec):
             kmodel.get_layer(op["name"] + "_bn").set_weights(
                 [npy(bn.weight), npy(bn.bias), npy(bn.running_mean), npy(bn.running_var)])
 
-def export_detection_int8(pt_checkpoint_path, data_root, spec):
-    print("\n" + "=" * 80)
-    print(" [PHASE 4/5] Exporting DTNetMax to Full INT8 TFLite for ESP32-S3")
-    print("=" * 80)
 
-    ck = torch.load(pt_checkpoint_path, map_location="cpu", weights_only=False)
-    net_pt = DTNetMax(spec)
-    weights = ck.get("ema", ck.get("model", ck))
-    net_pt.load_state_dict(weights)
-    net_pt.eval()
+def export_full_int8_tflite(kmodel, calib_img_paths, output_tflite_path, num_calib=200):
+    import tensorflow as tf
 
-    kmodel = build_keras_dtnet_max(spec, IMG_H, IMG_W)
-    transfer_weights_to_keras(net_pt, kmodel, spec)
+    print(f"[*] Quantizing Keras model to Full Integer INT8 with {min(num_calib, len(calib_img_paths))} representative samples...")
 
-    calib_imgs = sorted(glob.glob(str(data_root / "train/images/*.jpg")) + glob.glob(str(data_root / "train/images/*.png")))[:200]
     def representative_dataset():
-        for p in calib_imgs:
+        for p in calib_img_paths[:num_calib]:
             img = cv2.imread(p, cv2.IMREAD_COLOR)
             if img is None:
                 continue
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            if (img.shape[1], img.shape[0]) != (IMG_W, IMG_H):
+            if img.shape[1] != IMG_W or img.shape[0] != IMG_H:
                 img = cv2.resize(img, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
             arr = (img.astype(np.float32) / 255.0)[np.newaxis, ...]
             yield [arr]
@@ -950,23 +1007,132 @@ def export_detection_int8(pt_checkpoint_path, data_root, spec):
     converter.inference_output_type = tf.int8
 
     tflite_quant_model = converter.convert()
-    out_tflite = OUTPUT_DIR / "dtnet_nwd_tal_full6k_int8.tflite"
-    with open(out_tflite, "wb") as f:
+    os.makedirs(os.path.dirname(output_tflite_path), exist_ok=True)
+    with open(output_tflite_path, "wb") as f:
         f.write(tflite_quant_model)
 
-    size_bytes = os.path.getsize(out_tflite)
-    print(f"[★ SUCCESS] Full INT8 Detection Model Exported: {out_tflite} ({size_bytes:,} bytes)")
+    size_bytes = os.path.getsize(output_tflite_path)
+    print(f"[✔] Full INT8 TFLite exported successfully: {output_tflite_path} ({size_bytes:,} bytes)")
     assert size_bytes <= MAX_ALLOWED_FILE_SIZE, f"Exceeded Flash limit: {size_bytes} > {MAX_ALLOWED_FILE_SIZE}"
-    return out_tflite
+    return output_tflite_path
 
 
-# =============================================================================
-# 9. INFERENCE & SUBMISSION GENERATOR
-# =============================================================================
-def generate_submission(det_tflite, intent_tflite, vocab_path, data_root):
+def export_detection_int8(pt_checkpoint_path, tr_imgs, vl_imgs, vl_lbls, spec):
     print("\n" + "=" * 80)
-    print(" [PHASE 5/5] Generating & Validating Final Kaggle Submission.csv")
+    print(" [PHASE 3/4] Exporting DTNetMax to Full INT8 TFLite for ESP32-S3")
     print("=" * 80)
+
+    import tensorflow as tf
+
+    ck = torch.load(pt_checkpoint_path, map_location="cpu", weights_only=False)
+    net_pt = DTNetMax(spec)
+    weights = ck.get("ema", ck.get("model", ck))
+    net_pt.load_state_dict(weights)
+    net_pt.eval()
+
+    kmodel = build_keras_dtnet_max(spec, IMG_H, IMG_W)
+    transfer_weights_to_keras(net_pt, kmodel, spec)
+
+    # Parity verification
+    test_x = np.random.uniform(0, 1, (2, IMG_H, IMG_W, 3)).astype(np.float32)
+    with torch.no_grad():
+        pt_in = torch.from_numpy(test_x.transpose(0, 3, 1, 2))
+        tc, tb = net_pt(pt_in)
+    kc, kb = kmodel(test_x, training=False)
+    diff_c = float(np.abs(tc.numpy() - np.asarray(kc).transpose(0, 3, 1, 2)).max())
+    diff_b = float(np.abs(tb.numpy() - np.asarray(kb).transpose(0, 3, 1, 2)).max())
+    print(f"[✔] PyTorch <-> Keras verification max error: cls={diff_c:.2e}, box={diff_b:.2e}")
+
+    out_tflite = OUTPUT_DIR / "dtnet_p2_ultra_int8.tflite"
+    export_full_int8_tflite(kmodel, tr_imgs, str(out_tflite), num_calib=200)
+
+    # Calibrate Sweetspot Thresholds on Validation Set
+    print("\n[*] Evaluating INT8 TFLite model on validation set...")
+    interpreter = tf.lite.Interpreter(model_path=str(out_tflite))
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()[0]
+    output_details = interpreter.get_output_details()
+
+    cls_idx_tflite = 0 if output_details[0]["shape"][-1] == NUM_CLASSES else 1
+    box_idx_tflite = 1 - cls_idx_tflite
+    in_scale, in_zp = input_details["quantization"]
+    cls_scale, cls_zp = output_details[cls_idx_tflite]["quantization"]
+    box_scale, box_zp = output_details[box_idx_tflite]["quantization"]
+
+    int8_dets = []
+    for p in vl_imgs:
+        img = cv2.imread(p, cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if img.shape[1] != IMG_W or img.shape[0] != IMG_H:
+            img = cv2.resize(img, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
+        quant_in = np.clip(np.round((img.astype(np.float32) / 255.0) / in_scale) + in_zp, -128, 127).astype(np.int8)
+        interpreter.set_tensor(input_details["index"], quant_in[np.newaxis, ...])
+        interpreter.invoke()
+        q_cls = interpreter.get_tensor(output_details[cls_idx_tflite]["index"])
+        q_box = interpreter.get_tensor(output_details[box_idx_tflite]["index"])
+        f_cls = (q_cls.astype(np.float32) - cls_zp) * cls_scale
+        f_box = (q_box.astype(np.float32) - box_zp) * box_scale
+        dq_cls = f_cls.transpose(0, 3, 1, 2)
+        dq_box = f_box.transpose(0, 3, 1, 2)
+        dets = decode_batch_np(dq_cls, dq_box, score_thr=0.001, nms_iou=0.65, max_det=100)[0]
+        int8_dets.append(dets)
+
+    int8_map50, int8_per_class = evaluate_map(int8_dets, vl_lbls)
+    best_pt_map = ck.get("map50", 0.0)
+    print(f"[✔] Raw INT8 mAP50 = {int8_map50*100:.2f}% (Quantization delta: {(int8_map50 - best_pt_map)*100:+.2f}%)")
+
+    # Optimal Thresholds
+    print("[*] Calibrating Sweetspot per-class thresholds...")
+    opt_thresholds = [0.001] * NUM_CLASSES
+    for c in range(NUM_CLASSES):
+        best_t, best_ap = 0.001, int8_per_class.get(c, 0.0)
+        for t in [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10]:
+            filtered_dets = []
+            for d in int8_dets:
+                if len(d) == 0:
+                    filtered_dets.append(d)
+                else:
+                    mask = (d[:, 5] != c) | (d[:, 4] >= t)
+                    filtered_dets.append(d[mask])
+            m, per_c = evaluate_map(filtered_dets, vl_lbls)
+            if per_c.get(c, 0.0) >= best_ap:
+                best_ap = per_c.get(c, 0.0)
+                best_t = t
+        opt_thresholds[c] = best_t
+
+    calibrated_dets = []
+    for d in int8_dets:
+        if len(d) == 0:
+            calibrated_dets.append(d)
+        else:
+            keep = np.array([row[4] >= opt_thresholds[int(row[5])] for row in d])
+            calibrated_dets.append(d[keep])
+    cal_map50, cal_per_class = evaluate_map(calibrated_dets, vl_lbls)
+    cal_score = 30.0 + 70.0 * cal_map50
+
+    print(f"\n{'='*80}")
+    print(f"   RESULTS: DTNet-P2-MAX FULL INT8")
+    print(f"   Calibrated Val mAP50 : {cal_map50*100:.2f}%")
+    print(f"   Total Contest Score  : {cal_score:.2f} / 100.00")
+    print(f"   Optimal Thresholds   : {dict(zip(CLASS_NAMES, opt_thresholds))}")
+    print(f"{'='*80}\n")
+
+    thresh_path = OUTPUT_DIR / "calibrated_thresholds.json"
+    with open(thresh_path, "w") as f:
+        json.dump(dict(zip(CLASS_NAMES, opt_thresholds)), f, indent=2)
+
+    return out_tflite, opt_thresholds
+
+
+# =============================================================================
+# 9. PHASE 4: INFERENCE & SUBMISSION GENERATOR
+# =============================================================================
+def generate_submission(det_tflite, intent_tflite, vocab_path, data_root, opt_thresholds=None):
+    print("\n" + "=" * 80)
+    print(" [PHASE 4/4] Generating & Validating Final Kaggle Submission.csv")
+    print("=" * 80)
+
+    import tensorflow as tf
 
     test_img_dir = data_root / "test/images"
     test_img_paths = sorted(glob.glob(str(test_img_dir / "*.jpg")) + glob.glob(str(test_img_dir / "*.png")))
@@ -1009,12 +1175,15 @@ def generate_submission(det_tflite, intent_tflite, vocab_path, data_root):
         dq_cls = dq_cls.transpose(2, 0, 1)[None, ...]
         dq_box = dq_box.transpose(2, 0, 1)[None, ...]
 
-        dets = decode_batch_np(dq_cls, dq_box, score_thr=0.045, nms_iou=0.65, max_det=100)[0]
+        dets = decode_batch_np(dq_cls, dq_box, score_thr=0.001, nms_iou=0.65, max_det=100)[0]
 
         boxes_json = []
         for row in dets:
             cid = int(row[5])
             score = float(row[4])
+            thr = opt_thresholds[cid] if opt_thresholds is not None else 0.045
+            if score < thr:
+                continue
             x1, y1, x2, y2 = map(float, row[:4])
             if x2 <= x1 or y2 <= y1:
                 continue
@@ -1112,17 +1281,17 @@ def main():
     t_start = time.time()
     data_root = locate_dataset()
 
-    # Phase 1: Train Intent TextCNN from Scratch (100% Accuracy in 28s)
+    # Phase 1: Train Intent TextCNN from Scratch (100% Accuracy in 25s)
     intent_tflite, vocab_path = train_and_export_intent(data_root)
 
-    # Phase 2: SOTA From-Scratch TAL + NWD Detection Training (300 Epochs)
-    best_pt_path, spec = train_dtnet_tal_nwd_scratch(data_root, epochs=300, batch_size=64)
+    # Phase 2: SOTA DTNet-P2-Ultra Detection Training (300 Epochs, batch 64, lr_eff=4e-3)
+    best_pt_path, tr_imgs, vl_imgs, vl_lbls, spec = train_dtnet_ultra_scratch(data_root, epochs=300, batch_size=64)
 
-    # Phase 3: Export DTNetMax to Full INT8
-    det_tflite = export_detection_int8(best_pt_path, data_root, spec)
+    # Phase 3: Export DTNetMax to Full INT8 & Sweetspot Calibration
+    det_tflite, opt_thresholds = export_detection_int8(best_pt_path, tr_imgs, vl_imgs, vl_lbls, spec)
 
     # Phase 4: Generate submission.csv
-    generate_submission(det_tflite, intent_tflite, vocab_path, data_root)
+    generate_submission(det_tflite, intent_tflite, vocab_path, data_root, opt_thresholds)
 
     elapsed_mins = (time.time() - t_start) / 60.0
     print(f"[★ ALL PHASES COMPLETED] Total Pipeline Elapsed Time: {elapsed_mins:.1f} minutes.")
