@@ -1,15 +1,15 @@
 {
-  "best_mAP50": 0.9884587891225655,
-  "optimal_nms_iou": 0.65,
+  "best_mAP50": 0.9891997749004519,
+  "optimal_nms_iou": 0.6,
   "optimal_score_thr": 0.001,
   "per_class_ap50": {
-    "bottle": 0.9915884328617216,
-    "cup": 0.9925361857186362,
-    "phone": 0.9913361465932173,
-    "book": 0.9747239741684024,
-    "mouse": 0.9838052322079336,
-    "box": 0.9984494083286358,
-    "toy_car": 0.9867721439794113
+    "bottle": 0.9937423091735789,
+    "cup": 0.9934382272245526,
+    "phone": 0.9901796450968152,
+    "book": 0.9752535728289394,
+    "mouse": 0.9854478513765684,
+    "box": 0.9983115289946143,
+    "toy_car": 0.9880252896080943
   },
   "tflite_path": "qualifiers/weights/dtnet_nwd_tal_full6k/dtnet_nwd_tal_full6k_int8.tflite"
 }

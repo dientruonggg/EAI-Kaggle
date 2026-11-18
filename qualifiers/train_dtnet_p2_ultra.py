@@ -265,7 +265,7 @@ def _hsv_jitter(img, rng, gains):
 class FastDetDataset(torch.utils.data.Dataset):
     def __init__(self, img_paths, labels, img_w=IMG_W, img_h=IMG_H, stride=STRIDE, train=True,
                  mosaic_p=0.5, scale=(0.75, 1.25), translate=0.1, flip_p=0.5,
-                 hsv=(0.015, 0.5, 0.35), orig_w=ORIG_W, orig_h=ORIG_H, seed=42):
+                 hsv=(0.015, 0.5, 0.35), orig_w=ORIG_W, orig_h=ORIG_H, seed=42, cache=False):
         self.img_paths = list(img_paths)
         self.labels = list(labels)
         self.W, self.H, self.stride = int(img_w), int(img_h), int(stride)
@@ -275,6 +275,21 @@ class FastDetDataset(torch.utils.data.Dataset):
         self.orig_w, self.orig_h, self.seed = orig_w, orig_h, seed
         self.epoch = mp.Value("i", 0)
         self.mosaic_p = mp.Value("d", float(mosaic_p))
+
+        self.cached_imgs = None
+        if cache:
+            print(f"[*] Pre-caching {len(self.img_paths)} images in RAM...")
+            t_c = time.time()
+            self.cached_imgs = []
+            for p in self.img_paths:
+                img = cv2.imread(p, cv2.IMREAD_COLOR)
+                if img is None:
+                    raise FileNotFoundError(f"Image not found: {p}")
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                if img.shape[1] != self.W or img.shape[0] != self.H:
+                    img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
+                self.cached_imgs.append(img)
+            print(f"[✔] Cached {len(self.img_paths)} images into RAM in {time.time()-t_c:.1f}s")
 
     def set_epoch(self, e):
         self.epoch.value = int(e)
@@ -286,13 +301,16 @@ class FastDetDataset(torch.utils.data.Dataset):
         return len(self.img_paths)
 
     def _load(self, k):
-        p = self.img_paths[k]
-        img = cv2.imread(p, cv2.IMREAD_COLOR)
-        if img is None:
-            raise FileNotFoundError(f"Image not found: {p}")
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        if img.shape[1] != self.W or img.shape[0] != self.H:
-            img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        if self.cached_imgs is not None:
+            img = self.cached_imgs[k]
+        else:
+            p = self.img_paths[k]
+            img = cv2.imread(p, cv2.IMREAD_COLOR)
+            if img is None:
+                raise FileNotFoundError(f"Image not found: {p}")
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            if img.shape[1] != self.W or img.shape[0] != self.H:
+                img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
         b = self.labels[k].copy()
         if self.W != self.orig_w or self.H != self.orig_h:
             b[:, [1, 3]] *= self.W / self.orig_w

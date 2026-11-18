@@ -1,0 +1,23 @@
+{
+  "id": "dientruong/edge-ai-2026-detector-t4",
+  "id_no": 143385275,
+  "title": "Edge AI 2026 Detector T4",
+  "code_file": "edge-ai-2026-detector-t4.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "keywords": [
+    "gpu"
+  ],
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "competition_sources": [
+    "egde-ai-challenge-2026-lan-2-qualifiers"
+  ],
+  "model_sources": [],
+  "docker_image": "gcr.io/kaggle-private-byod/python@sha256:de153e6d303881930c51286216393d56f56b26458d0661350305a1e8144eea01",
+  "machine_shape": "NvidiaTeslaT4"
+}

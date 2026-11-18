@@ -1,17 +1,17 @@
 {
   "id": "dientruong/edge-ai-2026-detector-t4",
   "title": "Edge AI 2026 Detector T4",
-  "code_file": "kaggle_train_pipeline.py",
+  "code_file": "edge_ai_2026_detector_t4.ipynb",
   "language": "python",
-  "kernel_type": "script",
+  "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "true",
   "enable_tpu": "false",
   "enable_internet": "true",
-  "dataset_sources": [
-    "dientruong/qualifiers-dataset"
+  "dataset_sources": [],
+  "competition_sources": [
+    "egde-ai-challenge-2026-lan-2-qualifiers"
   ],
-  "competition_sources": [],
   "kernel_sources": [],
   "model_sources": []
 }
