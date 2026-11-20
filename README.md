@@ -12,6 +12,13 @@ Dự án áp dụng quy chuẩn **Spec-Driven Development (SDD)** của [GitHub 
 
 ---
 
+## Bố cục source
+
+- [Source vòng loại](src/qualifiers/) chứa các pipeline huấn luyện, đánh giá và tạo submission.
+- [Baseline vòng loại cố định](artifacts/release_frozen/) cung cấp inference offline cùng hai model INT8 và vocab có checksum. [Trọng số vòng loại](artifacts/weights/qualifiers/) và các kết quả đã có trên Git vẫn được giữ.
+- [Thí nghiệm cũ](experiments/archive/) chứa các bản DTNet và DuyToan. Xem [benchmark](docs/BENCHMARK_MATRIX.md), [roadmap](docs/roadmap.md) và [hướng dẫn chuyển đường dẫn](docs/source-layout.md).
+- [Dữ liệu vòng loại](datasets/qualifiers/) cần được đặt riêng sau khi clone.
+
 ## 🎯 Chiến lược Kép (Dual Strategy)
 
 1. **Vòng loại (Kaggle Leaderboard)**:

@@ -43,23 +43,23 @@ venv.bak/
 *.keras
 
 # Preserve lightweight baseline models already tracked
-!qualifiers/weights/mobilenet_bbox_160/best_weights.keras
-!qualifiers/weights/text_cnn.keras
-!qualifiers/weights/text_cnn_int8.tflite
-!qualifiers/weights/dtnet_clean_p2_200ep/*.tflite
-!qualifiers/weights/dtnet_nwd_tal_full6k/*.tflite
+!/artifacts/weights/qualifiers/mobilenet_bbox_160/best_weights.keras
+!/artifacts/weights/qualifiers/text_cnn.keras
+!/artifacts/weights/qualifiers/text_cnn_int8.tflite
+!/artifacts/weights/qualifiers/dtnet_clean_p2_200ep/*.tflite
+!/artifacts/weights/qualifiers/dtnet_nwd_tal_full6k/*.tflite
 
 # Whitelist reproduction package weights for BTC verification (<1.2MB total)
 !reproduce/weights/*.pt
 !reproduce/weights/*.tflite
 !reproduce/weights/*.json
-qualifiers/weights/champion_*.keras
-qualifiers/weights/continuous_loop/
-qualifiers/weights/evolution_*/
-qualifiers/weights/kaggle_t4/
-qualifiers/weights/trial20_extended/
-qualifiers/weights/deep_trial_*/
-qualifiers/weights/dtnet_p2_99plus/
+/artifacts/weights/qualifiers/champion_*.keras
+/artifacts/weights/qualifiers/continuous_loop/
+/artifacts/weights/qualifiers/evolution_*/
+/artifacts/weights/qualifiers/kaggle_t4/
+/artifacts/weights/qualifiers/trial20_extended/
+/artifacts/weights/qualifiers/deep_trial_*/
+/artifacts/weights/qualifiers/dtnet_p2_99plus/
 
 # Keep specific critical calibration/config files if needed
 !warmup/weights/tflite_micro_compat.json
@@ -71,44 +71,44 @@ warmup/data/train/
 warmup/data/test/
 warmup/data/train_augmented_traffic/
 warmup/data/external_coco_traffic/
-qualifiers/data/train/
-qualifiers/data/val/
-qualifiers/data/test/
-qualifiers/data_incoming/
-qualifiers/data_stress_test/
+/src/qualifiers/data/train/
+/src/qualifiers/data/val/
+/src/qualifiers/data/test/
+/src/qualifiers/data_incoming/
+/src/qualifiers/data_stress_test/
 *.zip
 *.tar
 *.tar.gz
-qualifiers/auto_download_status.json
+/src/qualifiers/auto_download_status.json
 
 # Runs & Logs
 runs/
 warmup/runs/
-qualifiers/runs/
+/src/qualifiers/runs/
 *.log
-qualifiers/candidate_submissions/*.log
-qualifiers/notes/*.log
-!qualifiers/weights/*/train.log
+/src/qualifiers/candidate_submissions/*.log
+/src/qualifiers/notes/*.log
+!/artifacts/weights/qualifiers/*/train.log
 
 # Submissions & Large CSV Dumps (Avoid committing 400MB+ of candidate CSVs)
 *.tmp
-qualifiers/candidate_submissions/*.csv
+/src/qualifiers/candidate_submissions/*.csv
 !qualifiers/candidate_submissions/candidate_clean_200ep_calibrated_14boxes.csv
 !qualifiers/candidate_submissions/candidate_dtnet_nwd_tal_full6k_9915.csv
-qualifiers/submissions/calibrated_*.csv
-qualifiers/submissions/stress_*.csv
-qualifiers/submissions/submission_*.csv
-qualifiers/submissions/test_preds_*.csv
-qualifiers/submissions/test_sweetspot_*.csv
-qualifiers/submissions/val_detection_preds*.csv
+/src/qualifiers/submissions/calibrated_*.csv
+/src/qualifiers/submissions/stress_*.csv
+/src/qualifiers/submissions/submission_*.csv
+/src/qualifiers/submissions/test_preds_*.csv
+/src/qualifiers/submissions/test_sweetspot_*.csv
+/src/qualifiers/submissions/val_detection_preds*.csv
 submission.csv
-qualifiers/submission.csv
+/src/qualifiers/submission.csv
 
 # Audio / Multimedia Recordings
 *.wav
 *.mp3
 *.ogg
-qualifiers/notes/audio_chunks/
+/src/qualifiers/notes/audio_chunks/
 
 # Agent teamwork workspace & scratch
 .agents/teamwork/
@@ -121,7 +121,14 @@ qualifiers/notes/audio_chunks/
 
 
 .env
-qualifiers/weights/dtnet_p2_champion/*.csv
+/artifacts/weights/qualifiers/dtnet_p2_champion/*.csv
 
 
 .vscode/reproduce_submission_dt2.zip
+
+# Local-only EAI datasets and generated output
+/artifacts/submission_package_btc/
+/artifacts/submission_package_btc.zip
+/artifacts/results/root/
+/artifacts/results/qualifiers/__pycache__/
+/artifacts/results/qualifiers/auto_download_status.json
