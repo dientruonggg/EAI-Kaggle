@@ -1,7 +1,11 @@
 # Byte-compiled / optimized / DLL files
-__pycache__/
+__pycache__
 *.py[cod]
 *$py.class
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.ipynb_checkpoints
 
 # C extensions
 *.so
@@ -32,6 +36,10 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env
+.env.*
+!.env.example
+!.env.sample
 
 # PyTorch & Weights (Ignore raw heavy weights, track architectures/code)
 *.pt
@@ -43,11 +51,14 @@ venv.bak/
 *.keras
 
 # Preserve lightweight baseline models already tracked
+!/artifacts/
 !/artifacts/weights/qualifiers/mobilenet_bbox_160/best_weights.keras
 !/artifacts/weights/qualifiers/text_cnn.keras
 !/artifacts/weights/qualifiers/text_cnn_int8.tflite
 !/artifacts/weights/qualifiers/dtnet_clean_p2_200ep/*.tflite
 !/artifacts/weights/qualifiers/dtnet_nwd_tal_full6k/*.tflite
+!/artifacts/release_frozen/weights/dtnet_nwd_tal_full6k_int8.tflite
+!/artifacts/release_frozen/weights/text_cnn_int8.tflite
 
 # Whitelist reproduction package weights for BTC verification (<1.2MB total)
 !reproduce/weights/*.pt
@@ -67,6 +78,19 @@ venv.bak/
 # Datasets & Big Data
 datasets/
 data/
+!/datasets/
+/datasets/*
+!/datasets/qualifiers/
+/datasets/qualifiers/*
+!/datasets/qualifiers/data/
+!/datasets/qualifiers/data_incoming/
+!/datasets/qualifiers/data_stress_test/
+/datasets/qualifiers/data/*
+/datasets/qualifiers/data_incoming/*
+/datasets/qualifiers/data_stress_test/*
+!/datasets/qualifiers/data/README.md
+!/datasets/qualifiers/data_incoming/README.md
+!/datasets/qualifiers/data_stress_test/README.md
 warmup/data/train/
 warmup/data/test/
 warmup/data/train_augmented_traffic/
@@ -81,28 +105,39 @@ warmup/data/external_coco_traffic/
 *.tar.gz
 /src/qualifiers/auto_download_status.json
 
+# Temporary and incomplete downloads
+*.tmp
+*.part
+*.partial
+*.crdownload
+*.download
+.rsync-partial
+
 # Runs & Logs
 runs/
 warmup/runs/
 /src/qualifiers/runs/
 *.log
-/src/qualifiers/candidate_submissions/*.log
 /src/qualifiers/notes/*.log
 !/artifacts/weights/qualifiers/*/train.log
 
 # Submissions & Large CSV Dumps (Avoid committing 400MB+ of candidate CSVs)
-*.tmp
-/src/qualifiers/candidate_submissions/*.csv
-!qualifiers/candidate_submissions/candidate_clean_200ep_calibrated_14boxes.csv
-!qualifiers/candidate_submissions/candidate_dtnet_nwd_tal_full6k_9915.csv
-/src/qualifiers/submissions/calibrated_*.csv
-/src/qualifiers/submissions/stress_*.csv
-/src/qualifiers/submissions/submission_*.csv
-/src/qualifiers/submissions/test_preds_*.csv
-/src/qualifiers/submissions/test_sweetspot_*.csv
-/src/qualifiers/submissions/val_detection_preds*.csv
+/artifacts/results/qualifiers/candidate_submissions/*.csv
+/artifacts/results/qualifiers/candidate_submissions/calibrated_*_thresholds.json
+!/artifacts/results/qualifiers/candidate_submissions/calibrated_rect_240x320_thresholds.json
+!/artifacts/results/qualifiers/candidate_submissions/candidate_300ep_golden_sweetspot_58k.csv
+!/artifacts/results/qualifiers/candidate_submissions/candidate_clean_200ep_calibrated_14boxes.csv
+!/artifacts/results/qualifiers/candidate_submissions/candidate_dtnet_nwd_tal_full6k_9915.csv
+/artifacts/results/qualifiers/submissions/calibrated_*.csv
+/artifacts/results/qualifiers/submissions/stress_*.csv
+/artifacts/results/qualifiers/submissions/submission_*.csv
+!/artifacts/results/qualifiers/submissions/submission_20261104_100308.csv
+/artifacts/results/qualifiers/submissions/test_preds_*.csv
+/artifacts/results/qualifiers/submissions/test_sweetspot_*.csv
+/artifacts/results/qualifiers/submissions/val_detection_preds*.csv
 submission.csv
-/src/qualifiers/submission.csv
+/src/qualifiers/intent_preds.csv
+/artifacts/results/qualifiers/intent_preds.csv
 
 # Audio / Multimedia Recordings
 *.wav
@@ -120,15 +155,17 @@ submission.csv
 .specify/logs/
 
 
-.env
 /artifacts/weights/qualifiers/dtnet_p2_champion/*.csv
 
 
 .vscode/reproduce_submission_dt2.zip
 
 # Local-only EAI datasets and generated output
-/artifacts/submission_package_btc/
+/submission_package_btc
+/submission_package_btc.zip
+/artifacts/submission_package_btc
 /artifacts/submission_package_btc.zip
 /artifacts/results/root/
-/artifacts/results/qualifiers/__pycache__/
 /artifacts/results/qualifiers/auto_download_status.json
+/experiments/small_detectors/artifacts/
+/experiments/small_detectors/*_artifacts/
